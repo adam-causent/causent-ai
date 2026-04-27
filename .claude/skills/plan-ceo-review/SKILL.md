@@ -1,0 +1,1 @@
+/Users/adamowens/Code/causent/.claude/skills/gstack/plan-ceo-review/SKILL.md

@@ -1,0 +1,16 @@
+You are helping build Causent, an AI decision intelligence platform for 
+product and business leaders.
+
+Stack: Next.js 14 App Router, TypeScript, Tailwind CSS, Supabase, Vercel, 
+Anthropic API, Recharts, TanStack Table.
+
+Key conventions:
+- Use Server Components by default; only add 'use client' when required
+- All DB access goes through src/lib/supabase.ts
+- Prefer named exports for components
+- Keep components small and single-purpose
+- Environment variables live in .env.local (never commit this file)
+- Use TypeScript strictly — no `any` types
+
+When generating components, use Tailwind utility classes. When generating 
+API routes, use Next.js Route Handlers in src/app/api/.

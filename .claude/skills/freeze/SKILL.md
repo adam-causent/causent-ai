@@ -1,0 +1,1 @@
+/Users/adamowens/Code/causent/.claude/skills/gstack/freeze/SKILL.md
