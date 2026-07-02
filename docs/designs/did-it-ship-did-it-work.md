@@ -158,17 +158,93 @@ is not installed), 2 iterations, 2026-07-02:
   named (linear pre-trend). Loop stopped at iteration 2 (converging 7→8, remaining
   items were spec refinements now applied).
 
+## Eng Review Decisions (2026-07-02)
+
+Engineering review (SELECTIVE, Python-first runtime confirmed). Decisions:
+
+1. **Engine endpoint security.** The Python engine is a separate Vercel function
+   the app calls over an internal HTTP hop. Guard it: **shared-secret** (env var,
+   so it's not publicly invocable) + **hard input cap** (series ≤ ~3650 points) +
+   request timeout. Closes the DoS/compute-abuse surface the CEO review's DB-boundary
+   fix didn't cover.
+2. **E1 stats home = the single Python engine, computed async.** E1's detectability
+   proxy runs through the same engine (one statistical source of truth — readout,
+   E1, E3, and the future learning loop agree by construction) but is computed
+   **asynchronously after connect** ("checking detectability…" → result) so the
+   Python cold-start never blocks the connect flow. Rejected a TS proxy: it would
+   duplicate t-PPF/variance math across two languages and silently drift.
+3. **Readout contract = BATCH, one row PER ACTION, method REGISTRY.** One engine
+   call per metric takes the series + all candidate action dates + the method list
+   and returns `action × method` results in one pass (scales to chatty repos;
+   amortizes cold-start; makes E3's placebo cheap). **Every action always gets its
+   own row.** v1 method registry ships **two methods**: a naive **14-day
+   before/after** (mean delta + t-test, a cheap sanity cross-check) and the
+   **segmented OLS ITS** (the rigorous estimate). Diff-in-diff etc. slot into the
+   registry later with no rewrite.
+4. **Clustering is now an OVERLAY, not a replacement.** Co-occurring same-metric
+   actions each KEEP their own row; the CLUSTER adds a joint readout + a `clustered`
+   flag on members (belief carried by the cluster edge). No action is ever hidden.
+   This supersedes the PRD's "group into a CLUSTER node" wording.
+5. **LLM summary eval = adversarial + regression.** Assert the templated summary
+   NEVER upgrades/invents a causal claim under adversarial inputs (malicious PR
+   titles, extreme lifts, inconclusive results) and stays in its slots; lock a
+   regression baseline. This is the trust guardrail — it gets the complete eval.
+6. **Test harness (none exists today).** Establish **vitest** (TS) + **pytest**
+   (Python engine). Golden-data engine tests (known-step recovery, noise→inconclusive,
+   degenerate→inconclusive, placebo behavior), an **RLS cross-tenant** security test
+   (user A cannot read B's edges), and an **E2E** demo-path test.
+7. **Perf.** Batch readouts (decision 3) + a single joined query for graph load
+   (nodes + edges + latest evidence) to avoid N+1.
+
+### Two-methods-displayed — required mitigations (user kept both; 2026-07-02)
+The outside voice flagged that displaying two methods per action is a trust +
+schema + rendering risk. The decision to show BOTH stands, so these become
+mandatory:
+- **Schema:** add a `methodology` enum value for the naive 14-day method (PRD had
+  only `{ITS, MANUAL}`).
+- **belief_score:** recompute selects by an explicit **authoritative-method key**
+  (ITS is authoritative), NOT `latest created_at` — batch writes multiple method
+  rows per readout, so insert-order must not decide belief.
+- **Rendering:** each edge renders ONE authoritative `(method, scope)` (color +
+  opacity); the non-authoritative method + any cluster readout live in the edge's
+  **detail panel**, not on the edge glyph.
+- **Disagreement rule + eval:** define what the UI does when naive and ITS disagree
+  on sign or significance (recommended: mark authoritative = ITS, and *widen the
+  caveat* — naive's tighter CI must never be presented as more trustworthy). Add a
+  test for the disagreement case. This directly answers the "dominated method has
+  tighter CIs" trap.
+
+### Outside-voice hardening (folded, 2026-07-02)
+- **T0 is CONTINGENT-gating.** Decisions #1/#3/#6 (separate Python fn, batch Python
+  contract, pytest golden tests) are contingent on T0 picking Python over the TS
+  fallback. First task = a **bare numpy OLS + t-PPF proof** with an explicit
+  pass/fail: t inverse-CDF (inverse regularized incomplete beta) matches scipy to a
+  stated CI tolerance. Not a checkbox.
+- **Batch cost cap.** Cap **action count per batch** (not just series length ≤3650) —
+  real cost is O(actions × points). Specify the window-overlap / adaptive-density /
+  cluster-resolution ordering inside one invocation.
+- **E1 async shape.** Implement E1 as a single non-blocking client-side fetch the
+  connect screen awaits ("checking…" → result **in the connect flow**) — no job
+  queue, still hits its specified surface.
+- **Shared-secret hardening.** Add secret rotation + a per-caller rate limit (leaked
+  static secret → attacker spams max-size batches = cost/DoS vector).
+
+New scope vs the PRD: the 14-day before/after method + the method registry seam
+(small, accepted — gives a naive-vs-rigorous cross-check); per-action rows change
+the clustering semantics (overlay, not node-replacement).
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
-| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | clean | SELECTIVE_EXPANSION; 3 proposed, 3 accepted, 0 deferred; 2 critical gaps found, both tasked (T-ERR, T-RLS) |
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | clean | SELECTIVE_EXPANSION; 3 proposed, 3 accepted; 2 critical gaps, both tasked (T-ERR, T-RLS) |
 | Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | not installed |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 0 | — | not run |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | clean | 4 findings, all folded (endpoint auth, E1 runtime, batch/registry contract, LLM eval); 0 critical gaps |
 | Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | not run |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | n/a |
 
-- **OUTSIDE VOICE:** Codex not installed → Claude adversarial subagent served as the outside voice. 2 iterations, 7/10 → 8/10, 15 issues found and all fixed.
-- **VERDICT:** CEO CLEARED — ready to implement pending the required Eng Review (`/plan-eng-review`). Spike T0 (numpy-only engine) gates the build.
+- **OUTSIDE VOICE:** Codex not installed → Claude adversarial subagent. CEO phase: 2 iterations, 7/10 → 8/10, 15 issues fixed. Eng phase: 6/10 — 1 substantive cross-model tension (2-method registry vs "no zoo"), surfaced to the user; 7 mitigations/hardening items folded as tasks (ET11–ET17).
+- **CROSS-MODEL:** Outside voice argued ITS-only; user chose to display both methods (per-action rows + registry) with the required mitigations (methodology enum, authoritative-method belief key, one-authoritative-per-edge rendering, disagreement rule+eval). Decision recorded, not overridden.
+- **VERDICT:** CEO + ENG CLEARED — ready to implement. **T0 (bare numpy OLS + t-PPF proof) is the gating first task**; 4 engine decisions are contingent on it. Run `/plan-design-review` next for the graph-canvas UI.
 
 NO UNRESOLVED DECISIONS
