@@ -14,6 +14,11 @@ import numpy as np
 Direction = Literal["POSITIVE", "NEGATIVE", "INCONCLUSIVE"]
 Method = Literal["ITS", "BEFORE_AFTER_14D", "MANUAL"]
 
+# Why a belief was withheld/downgraded, when it wasn't a plain OK projection.
+# PLACEBO: a firing placebo-in-time falsified an otherwise-credible readout.
+# DEGENERATE: the fit was unusable, so the effect is UNKNOWN (score None), not zero.
+BeliefReason = Literal["PLACEBO", "DEGENERATE"]
+
 # A readout status. INSUFFICIENT and DEGENERATE both render "inconclusive" but are
 # distinct causes; CONFOUNDED comes from cluster resolution upstream.
 Status = Literal["OK", "INSUFFICIENT", "DEGENERATE", "CONFOUNDED"]
@@ -94,10 +99,12 @@ class PowerResult:
 
 @dataclass(frozen=True)
 class Belief:
-    """Edge belief + direction (C8), derived from the authoritative ITS result."""
+    """Edge belief + direction (C8), derived from the authoritative ITS result
+    gated by the placebo falsification (C6)."""
 
     belief_score: float | None
     direction: Direction
+    reason: BeliefReason | None = None  # why belief was withheld/downgraded
 
 
 @dataclass(frozen=True)

@@ -135,13 +135,28 @@ EVIDENCE  (append-only — audit trail + ML feedstock)
 
 Recompute from the latest **authoritative-method** (ITS) evidence row for the edge:
 
-| Condition (ITS) | belief_score | direction |
-|---|---|---|
-| 95% CI excludes zero | 1.0 | sign of lift (POSITIVE / NEGATIVE) |
-| 95% CI includes zero | 0.5 | INCONCLUSIVE |
-| confounded | 0.0 | INCONCLUSIVE |
-| insufficient data (<28 pts) | NULL | INCONCLUSIVE |
-| MANUAL evidence only | 0.3 | sign of stated expectation |
+| Condition (ITS) | belief_score | direction | reason |
+|---|---|---|---|
+| CI excludes zero, **survives BH-FDR**, placebo did **not** fire | 1.0 | sign of lift (POSITIVE / NEGATIVE) | — |
+| CI excludes zero but **fails BH-FDR** (not significant after correction) | 0.5 | INCONCLUSIVE | — |
+| **placebo-in-time fired** (falsified — method fabricates structure) | 0.0 | INCONCLUSIVE | `PLACEBO` |
+| 95% CI includes zero | 0.5 | INCONCLUSIVE | — |
+| confounded | 0.0 | INCONCLUSIVE | — |
+| **degenerate fit** (rank / condition / variance — unusable) | NULL | INCONCLUSIVE | `DEGENERATE` |
+| insufficient data (<28 pts) | NULL | INCONCLUSIVE | — |
+| MANUAL evidence only | 0.3 | sign of stated expectation | — |
+
+**0.0 vs NULL is load-bearing.** `0.0` means *"no credible effect"* — confounded, or a
+readout the placebo falsified. `NULL` means *"we don't know"* — too little data, or a
+fit too degenerate to trust. A degenerate fit is UNKNOWN, never "no effect", so it maps
+to NULL (reason `DEGENERATE`), not 0.0.
+
+**Falsification gates belief.** Belief 1.0 requires the readout to survive two guards
+beyond its own CI: (1) the **placebo-in-time** check must not fire — the same method,
+aimed at a fake pre-period intervention, must find nothing; a firing placebo drops the
+edge to 0.0 (reason `PLACEBO`). (2) **Benjamini-Hochberg FDR at q=0.05** across all
+actions tested against the metric — one metric fans out to many actions, so a per-action
+nominal p<0.05 inflates false edges; an edge that fails BH-FDR is demoted to 0.5.
 
 The `BEFORE_AFTER_14D` method is stored and shown as a **descriptive cross-check**, but
 it is NOT authoritative — it never drives `direction`/`belief_score`. On method

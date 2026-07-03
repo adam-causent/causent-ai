@@ -13,9 +13,15 @@ import pytest
 
 from causal.belief_direction import belief_direction
 from causal.its_readout import its_readout
-from causal.types import ITSResult, Series
+from causal.types import Belief, ITSResult, PlaceboResult, Series
 
 _BASE = 738000  # arbitrary ordinal-day offset; centering absorbs it
+
+# Belief now depends on the placebo falsification too. Most cases feed a placebo that
+# did NOT fire (the readout survives falsification); a couple feed a firing one to
+# prove the gate. INSUFFICIENT (N/A) and a clean OK placebo both have fired=False.
+_NO_FIRE = PlaceboResult("OK", 0.0, False)
+_FIRED = PlaceboResult("OK", 9.9, True)
 
 
 def _its(status, lift, direction, ci_low=None, ci_high=None):
@@ -34,7 +40,7 @@ def test_significant_step_is_full_belief(step, direction):
     its = its_readout(Series(dates, vals, split=n_pre))
     assert its.status == "OK" and its.direction == direction  # C4 recovered the truth
 
-    b = belief_direction(its)
+    b = belief_direction(its, _NO_FIRE)
     assert b.belief_score == 1.0
     assert b.direction == direction
 
@@ -48,7 +54,7 @@ def test_zero_effect_with_noise_is_half_belief():
     its = its_readout(Series(dates, vals, split=n_pre))
     assert its.status == "OK" and its.direction == "INCONCLUSIVE"  # CI straddles 0
 
-    b = belief_direction(its)
+    b = belief_direction(its, _NO_FIRE)
     assert b.belief_score == 0.5
     assert b.direction == "INCONCLUSIVE"
 
@@ -56,23 +62,54 @@ def test_zero_effect_with_noise_is_half_belief():
 # ---------- degenerate / insufficient status branches ----------
 
 def test_insufficient_is_null_belief():
-    b = belief_direction(_its("INSUFFICIENT", None, "INCONCLUSIVE"))
+    b = belief_direction(_its("INSUFFICIENT", None, "INCONCLUSIVE"), _NO_FIRE)
     assert b.belief_score is None  # unknown, NOT zero
     assert b.direction == "INCONCLUSIVE"
+    assert b.reason is None
 
 
-@pytest.mark.parametrize("status", ["DEGENERATE", "CONFOUNDED"])
-def test_degenerate_and_confounded_are_zero_belief(status):
-    b = belief_direction(_its(status, None, "INCONCLUSIVE"))
+def test_degenerate_is_null_unknown_not_zero():
+    # DEGENERATE = unusable fit => UNKNOWN (None), NOT "no effect" (0.0). 0.0 is
+    # reserved for CONFOUNDED / genuine no-credible-effect. Reason marks the cause.
+    b = belief_direction(_its("DEGENERATE", None, "INCONCLUSIVE"), _NO_FIRE)
+    assert b.belief_score is None
+    assert b.direction == "INCONCLUSIVE"
+    assert b.reason == "DEGENERATE"
+
+
+def test_confounded_is_zero_belief():
+    b = belief_direction(_its("CONFOUNDED", None, "INCONCLUSIVE"), _NO_FIRE)
     assert b.belief_score == 0.0
     assert b.direction == "INCONCLUSIVE"
+    assert b.reason is None
+
+
+# ---------- placebo gate: a firing placebo falsifies an otherwise-credible OK ----------
+
+def test_placebo_fired_flips_significant_belief_to_zero():
+    # A textbook OK/POSITIVE readout (would be 1.0) is falsified by the placebo:
+    # belief drops to 0.0 with reason PLACEBO, direction nuked to INCONCLUSIVE.
+    its = _its("OK", 8.0, "POSITIVE", ci_low=6.0, ci_high=10.0)
+    survived = belief_direction(its, _NO_FIRE)
+    falsified = belief_direction(its, _FIRED)
+    assert survived == Belief(1.0, "POSITIVE")           # placebo clean -> full belief
+    assert falsified == Belief(0.0, "INCONCLUSIVE", "PLACEBO")  # SAME its, flipped
+
+
+def test_placebo_does_not_resurrect_insufficient_or_degenerate():
+    # No claim to falsify when the fit is unusable/insufficient: the placebo gate is
+    # skipped, so belief stays UNKNOWN (None), never forced to 0.0 by a firing placebo.
+    assert belief_direction(_its("INSUFFICIENT", None, "INCONCLUSIVE"), _FIRED) \
+        == Belief(None, "INCONCLUSIVE")
+    assert belief_direction(_its("DEGENERATE", None, "INCONCLUSIVE"), _FIRED) \
+        == Belief(None, "INCONCLUSIVE", "DEGENERATE")
 
 
 # ---------- boundary: CI touching zero is inconclusive, not significant ----------
 
 def test_ci_touching_zero_is_half_belief():
     # ci_low == 0 exactly => C4 emits direction INCONCLUSIVE => 0.5, never 1.0.
-    b = belief_direction(_its("OK", 3.0, "INCONCLUSIVE", ci_low=0.0, ci_high=6.0))
+    b = belief_direction(_its("OK", 3.0, "INCONCLUSIVE", ci_low=0.0, ci_high=6.0), _NO_FIRE)
     assert b.belief_score == 0.5
     assert b.direction == "INCONCLUSIVE"
 
@@ -81,25 +118,25 @@ def test_ci_touching_zero_is_half_belief():
 
 def test_inconclusive_ok_ignores_positive_lift():
     # A positive point estimate whose CI includes 0 must NOT leak a POSITIVE edge.
-    b = belief_direction(_its("OK", 4.2, "INCONCLUSIVE", ci_low=-1.0, ci_high=9.4))
+    b = belief_direction(_its("OK", 4.2, "INCONCLUSIVE", ci_low=-1.0, ci_high=9.4), _NO_FIRE)
     assert b.belief_score == 0.5
     assert b.direction == "INCONCLUSIVE"
 
 
 def test_degenerate_ignores_leftover_lift():
-    # Even if a lift/direction leaked onto a DEGENERATE result, belief is 0.0/INCONCLUSIVE.
-    b = belief_direction(_its("DEGENERATE", 99.0, "POSITIVE", ci_low=50.0, ci_high=150.0))
-    assert b.belief_score == 0.0
+    # Even if a lift/direction leaked onto a DEGENERATE result, belief is None/INCONCLUSIVE.
+    b = belief_direction(_its("DEGENERATE", 99.0, "POSITIVE", ci_low=50.0, ci_high=150.0), _NO_FIRE)
+    assert b.belief_score is None
     assert b.direction == "INCONCLUSIVE"
+    assert b.reason == "DEGENERATE"
 
 
 def test_total_over_every_status():
     # Totality: every Status maps to a defined belief; no crash, no undefined score.
     expected = {
-        "INSUFFICIENT": (None, "INCONCLUSIVE"),
-        "DEGENERATE": (0.0, "INCONCLUSIVE"),
-        "CONFOUNDED": (0.0, "INCONCLUSIVE"),
+        "INSUFFICIENT": Belief(None, "INCONCLUSIVE"),
+        "DEGENERATE": Belief(None, "INCONCLUSIVE", "DEGENERATE"),
+        "CONFOUNDED": Belief(0.0, "INCONCLUSIVE"),
     }
-    for status, (score, direction) in expected.items():
-        b = belief_direction(_its(status, None, "INCONCLUSIVE"))
-        assert (b.belief_score, b.direction) == (score, direction)
+    for status, want in expected.items():
+        assert belief_direction(_its(status, None, "INCONCLUSIVE"), _NO_FIRE) == want

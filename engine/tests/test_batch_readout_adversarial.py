@@ -20,14 +20,24 @@ import pytest
 import scipy.linalg as sla
 from scipy import stats
 
-from causal.batch_readout import batch_readout
+from causal.batch_readout import batch_readout, bh_fdr
 from causal.before_after_14d import before_after_14d
 from causal.belief_direction import belief_direction
 from causal.its_readout import its_readout
 from causal.placebo_in_time import placebo_in_time
-from causal.types import Series
+from causal.types import Belief, Series
 
 _BASE = 738000
+
+
+def _expected_belief(its_list, placebos, i, q=0.05):
+    """Reproduce batch_readout's belief: placebo-gated ITS projection, demoted from
+    1.0 to 0.5 when the action fails BH-FDR across the family of per-metric tests."""
+    belief = belief_direction(its_list[i], placebos[i])
+    discoveries = bh_fdr([r.p_value for r in its_list], q)
+    if belief.belief_score == 1.0 and i not in discoveries:
+        return Belief(0.5, "INCONCLUSIVE")
+    return belief
 
 
 def _stepped(n_pre, n_post, step, slope=0.3, level=5.0, noise=None, seed=0):
@@ -154,14 +164,15 @@ def test_maximally_overlapping_windows_match_direct_calls():
     series = _stepped(40, 40, 6.0, noise=1.2, seed=9)
     splits = [("p", 39), ("q", 40), ("r", 41)]
     rows = batch_readout(series, splits)
-    for (ref, split), row in zip(splits, rows):
-        view = Series(series.dates, series.values, split)
-        its = its_readout(view)
+    views = [Series(series.dates, series.values, split) for _, split in splits]
+    its_list = [its_readout(v) for v in views]
+    placebos = [placebo_in_time(v, its) for v, its in zip(views, its_list)]
+    for i, ((ref, split), row) in enumerate(zip(splits, rows)):
         assert row.action_ref == ref
-        assert row.its == its
-        assert row.before_after == before_after_14d(view)
-        assert row.placebo == placebo_in_time(view)
-        assert row.belief == belief_direction(its)
+        assert row.its == its_list[i]
+        assert row.before_after == before_after_14d(views[i])
+        assert row.placebo == placebos[i]
+        assert row.belief == _expected_belief(its_list, placebos, i)
 
 
 def test_input_series_is_not_mutated():
@@ -255,7 +266,7 @@ def test_belief_is_projection_of_its_only():
     series = _stepped(45, 45, 0.0, slope=0.5, noise=0.0)
     [row] = batch_readout(series, [("pr", 45)])
     view = Series(series.dates, series.values, 45)
-    assert row.belief == belief_direction(its_readout(view))  # ITS-derived
+    assert row.belief == belief_direction(its_readout(view), row.placebo)  # ITS-derived
     # the cross-check reports a large positive "lift" from the ramp...
     assert row.before_after.status == "OK"
     assert row.before_after.lift is not None and row.before_after.lift > 5.0
@@ -282,8 +293,9 @@ def test_mixed_batch_each_row_independent():
     flat = Series(_BASE + np.arange(60), np.full(60, 7.0), split=30)
     [frow] = batch_readout(flat, [("flat", 30)])
     assert frow.its.status == "DEGENERATE"
-    assert frow.belief.belief_score == 0.0
+    assert frow.belief.belief_score is None  # UNKNOWN, not "no effect"
     assert frow.belief.direction == "INCONCLUSIVE"
+    assert frow.belief.reason == "DEGENERATE"
 
 
 # ======================================================================
@@ -301,4 +313,4 @@ def test_out_of_range_and_edge_splits_never_raise(bad_split):
     if row.its.status == "INSUFFICIENT":
         assert row.belief.belief_score is None
     elif row.its.status == "DEGENERATE":
-        assert row.belief.belief_score == 0.0
+        assert row.belief.belief_score is None  # UNKNOWN, not "no effect"

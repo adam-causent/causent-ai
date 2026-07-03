@@ -37,8 +37,9 @@ def _oracle(series, target_frac=0.05, alpha=0.05, power=0.8):
     resid = y - (intercept + slope * t)
     df = n_pre - 2
     var = resid @ resid / df
+    n_win = min(n_pre, 14)  # fixed +/-14-day readout window caps the effective n
     mde = (stats.t.ppf(1 - alpha / 2, df) + stats.t.ppf(power, df)) \
-        * math.sqrt(var * 2.0 / n_pre)
+        * math.sqrt(var * 2.0 / n_win)
     return mde, bool(mde > target_frac * y.mean())
 
 
@@ -56,7 +57,8 @@ def test_recovers_known_mde_from_orthogonal_residual():
 
     df = n_pre - 2
     known_var = c * c * float(r @ r) / df
-    known_mde = (t_ppf(0.975, df) + t_ppf(0.8, df)) * math.sqrt(known_var * 2.0 / n_pre)
+    n_win = min(n_pre, 14)  # readout uses fixed +/-14-day windows, not full n_pre
+    known_mde = (t_ppf(0.975, df) + t_ppf(0.8, df)) * math.sqrt(known_var * 2.0 / n_win)
     assert res.mde == pytest.approx(known_mde, rel=1e-9)
     assert res.underpowered is False  # mde ~ 5e-3 << 0.05 * ~109 mean
 
@@ -91,6 +93,26 @@ def test_underpowered_false_when_series_is_quiet():
     o_mde, o_under = _oracle(_series(pre), target_frac=0.2)
     assert res.underpowered is False and o_under is False
     assert res.mde == pytest.approx(o_mde, rel=1e-9)
+
+
+# ---------- window-n: underpowered must NOT clear just because history grows ----------
+
+def test_underpowered_does_not_clear_as_history_grows():
+    # SAME noise process, longer and longer pre-history. Because the readout uses a
+    # FIXED +/-14-day window (n_win = min(n_pre, 14)), the MDE floor stops shrinking
+    # once n_pre >= 14 — a genuinely underpowered metric stays flagged no matter how
+    # much history accumulates. (With the old full-n_pre denominator, mde -> 0 and the
+    # gate would silently clear.)
+    rng = np.random.default_rng(4)
+    target = 0.02
+    mdes = []
+    for n_pre in (20, 60, 200, 800):
+        pre = 100.0 + rng.normal(0.0, 30.0, n_pre)
+        res = power_mde(_series(pre), target_frac=target)
+        assert res.underpowered is True          # never clears as history grows
+        mdes.append(res.mde)
+    # the MDE does not collapse toward zero with more history (window-n is fixed at 14)
+    assert min(mdes) > target * 100.0
 
 
 # ---------- boundary: perfectly linear pre-history -> zero-variance MDE ----------

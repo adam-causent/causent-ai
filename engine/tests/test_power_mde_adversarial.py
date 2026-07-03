@@ -40,8 +40,9 @@ def _oracle(series, target_frac=0.05, alpha=0.05, power=0.8):
     resid = y - (intercept + slope * t)
     df = n_pre - 2
     var = resid @ resid / df
+    n_win = min(n_pre, 14)  # fixed +/-14-day readout window caps the effective n
     mde = (stats.t.ppf(1 - alpha / 2, df) + stats.t.ppf(power, df)) \
-        * math.sqrt(var * 2.0 / n_pre)
+        * math.sqrt(var * 2.0 / n_win)
     return mde, bool(mde > target_frac * y.mean())
 
 

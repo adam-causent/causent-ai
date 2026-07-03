@@ -10,9 +10,17 @@ the data can't deliver (decision-graph.md, statistical honesty).
 
 Contract: power_mde(series, target_frac, alpha, power) -> PowerResult.
   var = residual variance of a linear (level + slope) detrend of the pre-history,
-        df = n_pre - 2.
-  mde = (t_ppf(1-alpha/2, df) + t_ppf(power, df)) * sqrt(var * (1/n_pre + 1/n_pre)).
+        df = n_pre - 2 (the full pre-history stabilizes the variance estimate).
+  n_win = min(n_pre, 14) — the effective per-side sample the readout actually uses.
+  mde = (t_ppf(1-alpha/2, df) + t_ppf(power, df)) * sqrt(var * (1/n_win + 1/n_win)).
   underpowered = mde > target_frac * abs(mean(pre)).
+
+  Why n_win, not n_pre: the authoritative readout compares FIXED +/-14-day windows
+  around the intervention (the spec's before/after window), so its detection power is
+  capped by those 14 points regardless of how much history accumulates. Dividing the
+  standard error by the full n_pre would let a genuinely underpowered metric silently
+  clear the gate as its history grows longer; pinning the effective n at the 14-day
+  window keeps the MDE honest.
 
 Invariant: too little pre-history to detrend (n_pre < 3), a non-finite value in
 the pre-window, or a rank-deficient time axis has no defensible MDE -> mde=None
@@ -29,6 +37,8 @@ import numpy as np
 
 from causal.t_ppf import t_ppf
 from causal.types import PowerResult, Series
+
+_WINDOW = 14  # per-side day floor of the readout window (shared with C4/C5/C6)
 
 
 def power_mde(series: Series, target_frac: float = 0.05,
@@ -55,6 +65,7 @@ def power_mde(series: Series, target_frac: float = 0.05,
     if not isfinite(var):
         return PowerResult(None, True)
 
+    n_win = min(n_pre, _WINDOW)  # fixed +/-14-day readout window caps the power
     mde = (t_ppf(1.0 - alpha / 2.0, float(df)) + t_ppf(power, float(df))) \
-        * sqrt(var * (2.0 / n_pre))
+        * sqrt(var * (2.0 / n_win))
     return PowerResult(mde, mde > target_frac * abs(float(pre.mean())))

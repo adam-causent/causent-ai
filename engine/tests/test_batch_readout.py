@@ -14,12 +14,22 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from causal.batch_readout import batch_readout
+from causal.batch_readout import batch_readout, bh_fdr
 from causal.before_after_14d import before_after_14d
 from causal.belief_direction import belief_direction
 from causal.its_readout import its_readout
 from causal.placebo_in_time import placebo_in_time
-from causal.types import Series
+from causal.types import Belief, Series
+
+
+def _expected_belief(its_list, placebos, i, q=0.05):
+    """Reproduce batch_readout's belief for action i: the placebo-gated ITS
+    projection, demoted from 1.0 to 0.5 if it fails BH-FDR across the family."""
+    belief = belief_direction(its_list[i], placebos[i])
+    discoveries = bh_fdr([r.p_value for r in its_list], q)
+    if belief.belief_score == 1.0 and i not in discoveries:
+        return Belief(0.5, "INCONCLUSIVE")
+    return belief
 
 _BASE = 738000  # arbitrary ordinal-day offset; centering absorbs it
 
@@ -76,13 +86,15 @@ def test_rows_equal_direct_component_calls():
     rows = batch_readout(series, splits)
     assert [r.action_ref for r in rows] == ["a", "b", "c"]  # input order preserved
 
-    for (ref, split), row in zip(splits, rows):
-        view = Series(series.dates, series.values, split)
-        its = its_readout(view)
-        assert row.its == its
-        assert row.before_after == before_after_14d(view)
-        assert row.placebo == placebo_in_time(view)
-        assert row.belief == belief_direction(its)  # ITS-authoritative
+    views = [Series(series.dates, series.values, split) for _, split in splits]
+    its_list = [its_readout(v) for v in views]
+    placebos = [placebo_in_time(v, its) for v, its in zip(views, its_list)]
+    for i, ((ref, split), row) in enumerate(zip(splits, rows)):
+        assert row.its == its_list[i]
+        assert row.before_after == before_after_14d(views[i])
+        assert row.placebo == placebos[i]
+        # ITS-authoritative, placebo-gated, then BH-FDR across the three actions.
+        assert row.belief == _expected_belief(its_list, placebos, i)
 
 
 # ---------- adversarial: belief follows ITS, never the naive cross-check ----------
@@ -95,7 +107,7 @@ def test_belief_keys_off_its_not_before_after():
 
     assert row.its.status == "OK" and row.its.direction == "INCONCLUSIVE"
     assert row.belief.belief_score == 0.5
-    assert row.belief == belief_direction(row.its)
+    assert row.belief == belief_direction(row.its, row.placebo)
     # sanity: the cross-check exists and is descriptive-only, not what belief read
     assert row.before_after.method == "BEFORE_AFTER_14D"
 
@@ -152,12 +164,13 @@ def test_mixed_good_and_degenerate_actions():
     assert short.its.status == "INSUFFICIENT"
     assert short.its.lift is None and short.belief.belief_score is None
 
-    # flat metric on its own: DEGENERATE (no variance to explain) -> belief 0.0
+    # flat metric on its own: DEGENERATE (no variance) -> belief None (UNKNOWN, not 0.0)
     flat = Series(_BASE + np.arange(60), np.full(60, 7.0), split=30)
     [row] = batch_readout(flat, [("flat", 30)])
     assert row.its.status == "DEGENERATE"
-    assert row.belief.belief_score == 0.0
+    assert row.belief.belief_score is None
     assert row.belief.direction == "INCONCLUSIVE"
+    assert row.belief.reason == "DEGENERATE"
 
 
 # ---------- placebo: clean pre-history does not falsify a real readout ----------
@@ -198,3 +211,59 @@ def test_direction_matches_scipy_significance_under_noise():
     assert excludes_zero and step > 0            # oracle: significant positive
     assert row.its.status == "OK" and row.its.direction == "POSITIVE"
     assert row.its.lift == pytest.approx(step, abs=1e-9)
+
+
+# ---------- placebo GATE: a firing placebo flips a significant edge to 0.0 ----------
+
+def test_placebo_fired_flips_a_significant_edge_to_zero():
+    # A genuinely significant real step (would be belief 1.0) but with a SPURIOUS
+    # jump planted at the placebo midpoint: the placebo fires, so the causal claim is
+    # unverified and belief collapses to 0.0 / PLACEBO, direction nuked. End-to-end
+    # proof that falsification gates belief, not just the pure C8 mapping.
+    n = 90
+    dates = _BASE + np.arange(n)
+    vals = 5.0 + 0.3 * np.arange(n)
+    vals[30:] += 7.0   # spurious pre-period jump at the placebo midpoint -> fires
+    vals[60:] += 8.0   # real intervention effect at the split
+    [row] = batch_readout(Series(dates, vals, split=60), [("pr", 60)])
+
+    assert row.its.status == "OK" and row.its.direction == "POSITIVE"  # C4: strong edge
+    assert row.placebo.fired is True                                   # C6 falsifies it
+    assert row.belief.belief_score == 0.0
+    assert row.belief.direction == "INCONCLUSIVE"
+    assert row.belief.reason == "PLACEBO"
+
+
+# ---------- multiple-comparison control: BH-FDR removes false edges ----------
+
+def test_bh_fdr_matches_textbook_step_up():
+    # Classic BH: with m=10, the largest rank r whose p_(r) <= (r/10)*0.05 is r=2
+    # (0.008 <= 0.010), so exactly the two smallest p-values are discoveries.
+    ps = [0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205, 0.212, 0.5]
+    assert bh_fdr(ps, 0.05) == {0, 1}
+    assert bh_fdr([None, None], 0.05) == set()          # nothing tested
+    assert bh_fdr([0.2, 0.3, 0.9], 0.05) == set()       # none survive
+
+
+def test_fdr_demotes_false_edges_across_a_metric_family():
+    # A pure-null metric (no real step anywhere) fanned out to many actions. By chance
+    # some per-action CIs exclude zero (nominal false edges). BH-FDR across the family
+    # must strip them: far fewer — here zero — actions keep belief 1.0. Deterministic
+    # (fixed seed), so the counts are exact.
+    rng = np.random.default_rng(0)
+    n = 400
+    dates = _BASE + np.arange(n)
+    vals = 100.0 + 0.05 * np.arange(n) + rng.normal(0.0, 3.0, n)   # trend + noise, no step
+    series = Series(dates, vals, split=200)
+    splits = [(f"a{i}", s) for i, s in enumerate(range(30, 371, 10))]  # 35 OK actions
+
+    rows = batch_readout(series, splits)
+    oks = [r for r in rows if r.its.status == "OK"]
+    nominal_false = [r for r in oks if r.its.direction != "INCONCLUSIVE"]  # CI excludes 0
+    fdr_edges = [r for r in oks if r.belief.belief_score == 1.0]
+    demoted = [r for r in nominal_false if r.belief.belief_score == 0.5]
+
+    assert len(nominal_false) >= 2          # the uncorrected method would draw ~3 edges
+    assert len(fdr_edges) == 0              # BH-FDR removes every false edge here
+    assert len(demoted) >= 1                # demoted 1.0 -> 0.5 / INCONCLUSIVE
+    assert all(r.belief.direction == "INCONCLUSIVE" for r in demoted)
