@@ -215,33 +215,46 @@ def test_proj_admin_cannot_widen_scope(seeded):
         conn.rollback()
 
 
-# --- ESCALATION: org-admin granting itself 'owner' (vertical, within scope) ----
-def test_org_admin_self_grant_owner_is_rls_meaningless(seeded):
-    """An admin CAN self-escalate its own row admin->owner (no policy caps the
-    granted role at the granter's rank). We assert this is *only* a same-scope
-    vertical bump: owner buys nothing in RLS (no policy requires role_rank >
-    admin), so it is not a DB-level escalation. If owner ever unlocks a policy,
-    this test must be revisited."""
+# --- ESCALATION: org-admin CANNOT grant/self-upgrade a membership to 'owner' ---
+def test_org_admin_cannot_self_grant_owner(seeded):
+    """The membership WITH CHECK caps the granted role at the granter's own rank
+    (`has_scope_grant(scope, role)` alongside the admin floor). An org-admin
+    (rank 3) therefore cannot mint or self-upgrade any membership to 'owner'
+    (rank 4) — that requires already holding owner over the scope. This closes
+    the admin->owner self-escalation past the reserved owner>admin boundary."""
+    # self-upgrade own org-wide row admin->owner => blocked by WITH CHECK
+    with as_user(U_ORG_ADMIN, autocommit=False) as conn, conn.cursor() as cur:
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "update public.memberships set role='owner' "
+                "where user_id=%s and org_id=%s and project_id is null and workspace_id is null",
+                (U_ORG_ADMIN, ORG_C),
+            )
+        conn.rollback()
+    # mint a fresh 'owner' grant for another user => also blocked
+    with as_user(U_ORG_ADMIN, autocommit=False) as conn, conn.cursor() as cur:
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "insert into public.memberships (user_id, org_id, role) values (%s,%s,'owner')",
+                (U_D_MEMBER, ORG_C),
+            )
+        conn.rollback()
+    # within-rank grant (admin grants 'admin') still works => no over-block
     with as_user(U_ORG_ADMIN, autocommit=False) as conn, conn.cursor() as cur:
         cur.execute(
-            "update public.memberships set role='owner' "
+            "insert into public.memberships (user_id, org_id, role) values (%s,%s,'admin')",
+            (U_D_MEMBER, ORG_C),
+        )
+        assert cur.rowcount == 1
+        conn.rollback()
+    # the org-admin's own row is unchanged (still 'admin')
+    with seeded.cursor() as cur:
+        cur.execute(
+            "select role from public.memberships "
             "where user_id=%s and org_id=%s and project_id is null and workspace_id is null",
             (U_ORG_ADMIN, ORG_C),
         )
-        granted = cur.rowcount
-        conn.rollback()
-    # confirm no RLS policy anywhere requires the 'owner' rank (min_role='owner')
-    with seeded.cursor() as cur:
-        cur.execute(
-            "select count(*) from pg_policies where schemaname='public' "
-            "and (qual ilike '%''owner''%' or with_check ilike '%''owner''%')"
-        )
-        owner_gated_policies = cur.fetchone()[0]
-    assert granted == 1, "expected admin self-grant to succeed (documents the gap)"
-    assert owner_gated_policies == 0, (
-        "a policy now depends on the 'owner' rank -> admin->owner self-grant is a "
-        "REAL escalation, not RLS-meaningless"
-    )
+        assert cur.fetchone()[0] == "admin", "admin->owner self-grant must not persist"
 
 
 # --- anon role: policies are `to authenticated` only -> anon must see nothing --
@@ -264,12 +277,16 @@ def test_update_cannot_move_row_cross_tenant(seeded):
 
 
 # --- SECURITY DEFINER reachability: metric_scope over a FOREIGN metric ---------
-def test_metric_scope_definer_leaks_foreign_scope_uuid(seeded):
-    """metric_scope() is SECURITY DEFINER and EXECUTE-to-public: it returns the
-    workspace_id of ANY metric, bypassing RLS. This is a (low-value) cross-tenant
-    info leak — you must already know the foreign metric_id, and it returns only
-    a UUID, not row data. Documented, not a data-exfil vector."""
+def test_metric_scope_gates_foreign_scope_uuid(seeded):
+    """metric_scope() is SECURITY DEFINER, so it gates its own return on
+    has_scope_access(viewer): a foreign-tenant caller gets NULL (no cross-tenant
+    metric_id -> workspace_id leak), while a caller with access still resolves
+    its own metric's scope so the metric_observations policies keep working."""
+    # foreign-org member cannot resolve org C's metric scope
     with as_user(U_D_MEMBER) as conn, conn.cursor() as cur:
         cur.execute("select public.metric_scope(%s)", (M_C1A,))
-        got = cur.fetchone()[0]
-    assert got == WS_C1A, "metric_scope resolves foreign scope (definer bypass)"
+        assert cur.fetchone()[0] is None, "metric_scope leaks foreign scope (definer bypass)"
+    # a legitimate member of WS_C1A still resolves its own metric's scope
+    with as_user(U_WS_MEMBER) as conn, conn.cursor() as cur:
+        cur.execute("select public.metric_scope(%s)", (M_C1A,))
+        assert cur.fetchone()[0] == WS_C1A, "metric_scope over-blocks the owner (should resolve)"

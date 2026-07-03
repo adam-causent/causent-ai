@@ -83,10 +83,17 @@ language sql stable security definer set search_path = '' as $$
 $$;
 
 -- Resolve a metric's scope for metric_observations (which carries no scope_id).
+-- SECURITY DEFINER, so it must gate its own return: only a caller with viewer+
+-- access to the metric's workspace gets the scope back. Without this gate a
+-- foreign-tenant user could resolve any metric_id -> workspace_id (cross-tenant
+-- info leak). Returns NULL when the caller lacks access, which makes the
+-- metric_observations policies default-deny for foreign metrics.
 create function public.metric_scope(t_metric uuid)
 returns uuid
 language sql stable security definer set search_path = '' as $$
-  select scope_id from public.metrics where metric_id = t_metric;
+  select m.scope_id from public.metrics m
+  where m.metric_id = t_metric
+    and public.has_scope_access(m.scope_id, 'viewer');
 $$;
 
 -- ============================================================================
@@ -137,14 +144,28 @@ create policy workspaces_update on public.workspaces for update to authenticated
 -- ============================================================================
 -- MEMBERSHIP POLICIES  (admin+ over the granted scope manages members)
 -- ============================================================================
+-- Writes require TWO conditions on the granted (org,project,workspace) scope:
+--   1. admin+ floor        — only admins manage members.
+--   2. granter's rank cap  — the actor must hold >= the *granted* role's rank
+--      over that scope, so no admin can mint or self-upgrade a membership above
+--      its own rank. This closes the admin->owner self-grant: 'owner' (rank 4)
+--      requires the actor to already be an owner over the scope; an admin can't.
+-- owner stays reserved for server-side org delete + billing (see header); an
+-- admin therefore cannot escalate past the owner>admin boundary via RLS.
 
 create policy memberships_select on public.memberships for select to authenticated
   using (public.has_scope_grant(org_id, project_id, workspace_id, 'viewer'));
 create policy memberships_insert on public.memberships for insert to authenticated
-  with check (public.has_scope_grant(org_id, project_id, workspace_id, 'admin'));
+  with check (
+    public.has_scope_grant(org_id, project_id, workspace_id, 'admin')
+    and public.has_scope_grant(org_id, project_id, workspace_id, role)
+  );
 create policy memberships_update on public.memberships for update to authenticated
   using (public.has_scope_grant(org_id, project_id, workspace_id, 'admin'))
-  with check (public.has_scope_grant(org_id, project_id, workspace_id, 'admin'));
+  with check (
+    public.has_scope_grant(org_id, project_id, workspace_id, 'admin')
+    and public.has_scope_grant(org_id, project_id, workspace_id, role)
+  );
 create policy memberships_delete on public.memberships for delete to authenticated
   using (public.has_scope_grant(org_id, project_id, workspace_id, 'admin'));
 
