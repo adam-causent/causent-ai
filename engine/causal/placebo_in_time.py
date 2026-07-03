@@ -1,48 +1,72 @@
 """C6 — placebo-in-time falsification, pure numpy.
 
 Why: a real ITS readout is only trustworthy if the same method finds NOTHING when
-aimed at a fake intervention where nothing shipped. This re-runs C4 on a split
-placed at the midpoint of the pre-history; if that placebo shows a comparable or
-statistically significant "effect", the method is fitting spurious structure and
-the real readout is suspect (fired=True). See decision-graph.md ("trust unverified").
+aimed at a fake intervention where nothing shipped. This re-runs the segmented fit on
+a fake split inside the pre-history; if that placebo shows a comparable or
+significant "effect", the method is fitting spurious structure and the real readout is
+suspect (fired=True). See decision-graph.md ("trust unverified").
 
 Contract: placebo_in_time(series, real=None) -> PlaceboResult.
-  Fake split = midpoint of the pre-history. It must keep >= window (14d) on its pre
-  side and sit >= 2*window (28d) before the real split, so the placebo's post-window
-  never touches the real intervention. When that window can't be built, or C4 can't
-  fit it -> INSUFFICIENT (placebo_lift=None, fired=False).
-  Otherwise status OK and
-    fired = placebo 95% CI excludes 0  OR  (real readout is OK AND
-            |placebo_lift| >= 0.5*|real_lift|).
+  The fake split is placed so a full 14-day pre and 14-day post window fit ENTIRELY
+  within the available pre-history: the placebo post-window is the 14 days immediately
+  before the real intervention (placebo_split = split - 14) and its pre-window is all
+  history before that. This fires in the engine's real operating regime (any real split
+  >= 2*MIN_SIDE = 28), unlike a split//2 placement whose post-window ran into the real
+  intervention and needed ~112 days of history before it could be built at all.
+  When 14+14 cannot fit (split < 28), or the placebo fit is degenerate, the placebo is
+  NOT evaluable -> INSUFFICIENT (placebo_lift=None, fired=False) — an explicit "not
+  evaluable", never a silent non-fire. belief_direction withholds a confident 1.0 when
+  the placebo could not confirm the readout.
 
-`real` is the caller's already-computed C4 readout on the SAME series (batch_readout
-has it in hand); passing it avoids recomputing the real ITS here (the 3x recompute).
-When omitted it is computed once. The magnitude clause needs a real effect to compare
-against, so it is only consulted when `real` is OK — a placebo can still fire on its
-own significant CI even when the real readout is INSUFFICIENT (nothing to compare to).
+  fired = placebo (1 - PLACEBO_ALPHA) CI excludes 0   (a strong, conservatively-screened
+          spurious pre-period step)
+        OR (real readout is a SIGNIFICANT effect AND |placebo_lift| >= 0.5*|real_lift|).
+  The magnitude clause only applies when the real readout is significant (its CI excludes
+  0): there is no real effect for the placebo to "recover half of" when the real CI
+  includes 0, so on a null readout the clause is skipped (it would otherwise trip on
+  float-scale noise, since 0.5*|real_lift| ~ 0).
+  The placebo uses the raw segmented fit + step_ci directly (NOT its_readout, whose
+  FLOOR_CONFIDENT gate would reject the 14-day placebo post-window). PLACEBO_ALPHA is
+  stricter than 0.05: null control is carried by the floor + Durbin-Watson cap, so the
+  placebo is a conservative veto that only fires on egregious pre-period structure and
+  does not erase genuine effects.
+
+`real` is the caller's already-computed C4 readout on the SAME series (batch_readout has
+it in hand); passing it avoids recomputing the real ITS here. The magnitude clause needs
+a real effect to compare against, so it is only consulted when `real` is OK.
 """
 
 from __future__ import annotations
 
+from math import isfinite
+
 from causal.its_readout import its_readout
-from causal.types import MIN_SIDE, ITSResult, PlaceboResult, Series
+from causal.segmented_ols import segmented_ols
+from causal.step_ci import step_ci
+from causal.types import MIN_SIDE, PLACEBO_ALPHA, ITSResult, PlaceboResult, Series
+
+_NOT_EVALUABLE = PlaceboResult("INSUFFICIENT", None, False)
 
 
 def placebo_in_time(series: Series, real: ITSResult | None = None) -> PlaceboResult:
     split = int(series.split)
-    placebo_split = split // 2  # midpoint of the pre-history
-    if placebo_split < MIN_SIDE or split - placebo_split < 2 * MIN_SIDE:
-        return PlaceboResult("INSUFFICIENT", None, False)
+    if split < 2 * MIN_SIDE:                       # 14 pre + 14 post won't fit in pre-history
+        return _NOT_EVALUABLE
 
-    placebo = its_readout(
-        Series(series.dates[:split], series.values[:split], placebo_split)
-    )
-    if placebo.status != "OK":
-        return PlaceboResult("INSUFFICIENT", None, False)
+    placebo_split = split - MIN_SIDE               # post-window = 14 days before the real split
+    fit = segmented_ols(Series(series.dates[:split], series.values[:split], placebo_split))
+    if fit.degenerate:
+        return _NOT_EVALUABLE
 
-    if real is None:
+    ci_low, ci_high = step_ci(fit, alpha=PLACEBO_ALPHA)
+    if not (isfinite(ci_low) and isfinite(ci_high)):
+        return _NOT_EVALUABLE
+
+    placebo_lift = float(fit.coeffs[2])
+    ci_excludes_zero = ci_low > 0.0 or ci_high < 0.0
+    if real is None:                    # compute the real readout once when not supplied
         real = its_readout(series)
-    real_lift = real.lift if real.status == "OK" else None
-    magnitude_fires = real_lift is not None and abs(placebo.lift) >= 0.5 * abs(real_lift)
-    ci_excludes_zero = placebo.direction != "INCONCLUSIVE"
-    return PlaceboResult("OK", placebo.lift, magnitude_fires or ci_excludes_zero)
+    real_significant = real.status == "OK" and real.direction != "INCONCLUSIVE"
+    real_lift = real.lift if real_significant else None
+    magnitude_fires = real_lift is not None and abs(placebo_lift) >= 0.5 * abs(real_lift)
+    return PlaceboResult("OK", placebo_lift, ci_excludes_zero or magnitude_fires)

@@ -24,7 +24,7 @@ from scipy import linalg as sla
 from scipy import stats
 
 from causal.placebo_in_time import placebo_in_time
-from causal.types import PlaceboResult, Series
+from causal.types import FLOOR_CONFIDENT, PLACEBO_ALPHA, PlaceboResult, Series
 from hac_oracle import hac_cov
 
 _BASE = 738000
@@ -57,13 +57,24 @@ def _oracle_readout(dates, values, split, alpha=0.05):
 
 
 def _oracle_placebo(dates, values, split):
-    """Full C6 re-derivation for NON-degenerate inputs."""
-    placebo_split = split // 2
-    if placebo_split < _WINDOW or split - placebo_split < 2 * _WINDOW:
+    """Full C6 re-derivation for NON-degenerate inputs (adjacent-window placebo).
+
+    The fake split sits at split - MIN_SIDE (post-window = the 14 days before the real
+    split); the veto fires at PLACEBO_ALPHA. The magnitude clause compares to the REAL
+    readout only when it is OK (both real sides >= FLOOR_CONFIDENT), mirroring the floor.
+    """
+    if split < 2 * _WINDOW:
         return ("INSUFFICIENT", None, False)
-    p_lift, p_excl = _oracle_readout(dates[:split], values[:split], placebo_split)
-    real_lift, _ = _oracle_readout(dates, values, split)
-    mag = abs(p_lift) >= 0.5 * abs(real_lift)
+    placebo_split = split - _WINDOW
+    p_lift, p_excl = _oracle_readout(dates[:split], values[:split], placebo_split,
+                                     alpha=PLACEBO_ALPHA)
+    n_post = values.size - split
+    real_ok = split >= FLOOR_CONFIDENT and n_post >= FLOOR_CONFIDENT
+    if real_ok:
+        real_lift, real_excl = _oracle_readout(dates, values, split)  # real readout at 0.05
+        mag = real_excl and abs(p_lift) >= 0.5 * abs(real_lift)       # only if real is significant
+    else:
+        mag = False
     return ("OK", p_lift, bool(mag or p_excl))
 
 
@@ -84,9 +95,9 @@ def _well_formed(r: PlaceboResult):
 # Contract requirement 1: short pre-history -> INSUFFICIENT, never crash
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("split", [0, 1, 13, 14, 27, 28, 40, 54])
+@pytest.mark.parametrize("split", [0, 1, 13, 14, 20, 27])
 def test_short_pre_history_is_insufficient(split):
-    # For split < 55 the 2*window post gate can never be met -> INSUFFICIENT.
+    # For split < 2*window = 28 a 14-pre + 14-post placebo can't fit -> INSUFFICIENT.
     n = split + 30
     dates = _BASE + np.arange(n)
     vals = 5.0 + 0.3 * np.arange(n) + np.sin(np.arange(n))
@@ -96,9 +107,9 @@ def test_short_pre_history_is_insufficient(split):
     assert r.placebo_lift is None and r.fired is False
 
 
-def test_gate_boundary_54_55():
-    # 54 -> post side 27 < 28 (reject); 55 -> post side 28 (accept). Exact edge.
-    for split, expect_ok in ((54, False), (55, True)):
+def test_gate_boundary_27_28():
+    # 27 -> only 13 pre + 14 post available (reject); 28 -> 14 + 14 (accept). Exact edge.
+    for split, expect_ok in ((27, False), (28, True)):
         n = split + 20
         dates = _BASE + np.arange(n)
         vals = 5.0 + 0.3 * np.arange(n) + np.cos(np.arange(n))
@@ -152,7 +163,7 @@ def test_spurious_pre_period_break_fires(step):
     n_pre, n_post = 60, 30
     dates = _BASE + np.arange(n_pre + n_post)
     vals = 5.0 + 0.3 * np.arange(n_pre + n_post)
-    vals[n_pre // 2:] += step  # break planted exactly at the placebo midpoint
+    vals[n_pre - _WINDOW:] += step  # break planted exactly at the placebo split
     r = placebo_in_time(Series(dates, vals, split=n_pre))
     _well_formed(r)
     assert r.status == "OK"
@@ -299,12 +310,10 @@ def test_engine_matches_scipy_oracle_randomized(seed):
 
 
 def test_null_effect_magnitude_clause_matches_oracle():
-    # Characterization of the documented `|placebo_lift| >= 0.5*|real_lift|`
-    # clause on a genuinely NULL, un-confounded series: because real_lift is ~0
-    # the ratio test trips on float-scale noise. This is a property of the
-    # SPECIFIED formula, so the only correctness claim we can make is
-    # engine == oracle. (Design note: the clause has a false-positive rate near
-    # 70% on clean null data; that is a spec-level concern, not a code bug.)
+    # A genuinely NULL, un-confounded series with n_post below FLOOR_CONFIDENT: the real
+    # readout is not OK, so the `|placebo_lift| >= 0.5*|real_lift|` clause is skipped
+    # entirely and the veto reduces to the conservative PLACEBO_ALPHA CI test. The only
+    # correctness claim is engine == oracle.
     rng = np.random.default_rng(7)
     n_pre, n_post = 80, 40
     dates = _BASE + np.arange(n_pre + n_post)
