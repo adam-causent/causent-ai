@@ -42,3 +42,8 @@ next-env.d.ts
 
 # gstack (team mode — global install is source of truth)
 .claude/skills/gstack/
+
+# python engine
+engine/.venv/
+engine/**/__pycache__/
+engine/.pytest_cache/
