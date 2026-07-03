@@ -58,18 +58,18 @@ def _oracle_ci(series, alpha=0.05):
 # ---------- golden: recovery of a KNOWN truth ----------
 
 def test_recovers_known_positive_lift():
-    r = its_readout(_make(40, 40, [10.0, 0.5, 3.0, 0.25]))
+    r = its_readout(_make(50, 50, [10.0, 0.5, 3.0, 0.25]))  # >= FLOOR_CONFIDENT/side
     assert r.method == "ITS" and r.status == "OK"
     assert r.lift == pytest.approx(3.0, abs=1e-6)
     assert r.ci_low <= 3.0 <= r.ci_high
     assert r.direction == "POSITIVE"
-    assert r.n_pre == 40 and r.n_post == 40
+    assert r.n_pre == 50 and r.n_post == 50
     assert r.resid_var == pytest.approx(0.0, abs=1e-9)
     assert math.isfinite(r.cond_number)
 
 
 def test_recovers_known_negative_lift():
-    r = its_readout(_make(30, 20, [4.0, -0.1, -7.5]))  # post < 28 -> 3-coeff fit
+    r = its_readout(_make(50, 50, [4.0, -0.1, -7.5, 0.0]))  # >= FLOOR_CONFIDENT/side
     assert r.status == "OK"
     assert r.lift == pytest.approx(-7.5, abs=1e-6)
     assert r.direction == "NEGATIVE"
@@ -97,10 +97,11 @@ def test_direction_from_oracle_sign():
 # ---------- golden (statistical): detection & false-positive rates ----------
 
 def test_detects_true_effect():
-    # A strong effect must be called POSITIVE with the CI excluding 0 nearly always.
+    # A strong effect (with adequate history) must be called POSITIVE with the CI
+    # excluding 0 nearly always.
     truth = [1.0, 0.05, 5.0, 0.0]
     hits = sum(
-        its_readout(_make(30, 30, truth, sigma=2.0, seed=i)).direction == "POSITIVE"
+        its_readout(_make(50, 50, truth, sigma=2.0, seed=i)).direction == "POSITIVE"
         for i in range(400)
     )
     assert hits / 400 > 0.95
@@ -125,23 +126,24 @@ def test_hac_curbs_false_positives_under_autocorrelation():
 
 
 def test_null_false_positive_white_noise_band():
-    # Under iid noise the small-sample HAC over-fires modestly vs the 5% ideal —
-    # an honest, documented cost of the robustness. Assert the band it achieves.
+    # At/above the floor under iid noise the small-sample HAC over-fires modestly vs
+    # the 5% ideal — an honest, documented cost of the robustness. (Below the floor
+    # the readout withholds entirely; see test_below_floor_is_insufficient_history.)
     truth = [1.0, 0.05, 0.0, 0.0]
     draws = 2000
     fp = 0
     for i in range(draws):
-        r = its_readout(_make(30, 30, truth, sigma=2.0, seed=i))
+        r = its_readout(_make(45, 45, truth, sigma=2.0, seed=i))  # exactly at the floor
         assert r.status == "OK" and r.lift is not None  # readout still succeeds
         fp += r.direction != "INCONCLUSIVE"
-    assert 0.08 <= fp / draws <= 0.18
+    assert 0.04 <= fp / draws <= 0.13
 
 
 def test_p_value_matches_scipy_and_gates_significance():
     # p_value is the two-sided step p from the HAC SE: it must match a scipy t
     # oracle and be < 0.05 exactly when the 95% CI excludes 0 (same t critical value).
     for seed in range(30):
-        s = _make(30, 30, [1.0, 0.05, 1.5, 0.0], sigma=2.0, seed=seed)
+        s = _make(50, 50, [1.0, 0.05, 1.5, 0.0], sigma=2.0, seed=seed)
         r = its_readout(s)
         X = _design(s.dates, s.split)
         beta, *_ = sla.lstsq(X, s.values)
@@ -153,18 +155,40 @@ def test_p_value_matches_scipy_and_gates_significance():
         assert (r.p_value < 0.05) == (r.direction != "INCONCLUSIVE")
 
 
-# ---------- boundary: the 14-per-side gate ----------
+# ---------- boundary: the three-way fit / floor / confident gate ----------
+
+def _noisy_series(n_pre, n_post, seed=1):
+    """A plainly-fittable series (level + slope + step + noise), any n per side."""
+    n = n_pre + n_post
+    dates = _BASE + np.arange(n)
+    rng = np.random.default_rng(seed)
+    y = 1.0 + 0.1 * np.arange(n) + rng.normal(0.0, 0.5, n)
+    y[n_pre:] += 3.0
+    return Series(dates, y, n_pre)
+
 
 @pytest.mark.parametrize("n_pre,n_post,status", [
-    (14, 14, "OK"),           # both exactly at the floor -> readout runs
-    (13, 14, "INSUFFICIENT"),  # pre one short
-    (14, 13, "INSUFFICIENT"),  # post one short
-    (13, 13, "INSUFFICIENT"),
+    (13, 14, "INSUFFICIENT"),           # pre below MIN_SIDE -> unfittable
+    (14, 13, "INSUFFICIENT"),           # post below MIN_SIDE -> unfittable
+    (14, 14, "INSUFFICIENT_HISTORY"),   # fittable but below FLOOR_CONFIDENT
+    (44, 44, "INSUFFICIENT_HISTORY"),   # one short of the confident floor
+    (45, 44, "INSUFFICIENT_HISTORY"),   # post one short of the floor
+    (45, 45, "OK"),                     # both exactly at FLOOR_CONFIDENT -> confident
 ])
 def test_side_gate(n_pre, n_post, status):
-    r = its_readout(_make(n_pre, n_post, [1.0, 0.1, 3.0], sigma=0.5, seed=1))
+    r = its_readout(_noisy_series(n_pre, n_post))
     assert r.status == status
     assert r.n_pre == n_pre and r.n_post == n_post
+
+
+def test_below_floor_is_insufficient_history():
+    # Fittable (>= MIN_SIDE/side) but below FLOOR_CONFIDENT: withhold the claim, never
+    # fabricate lift/ci/p. This is the "not yet evaluable, gathering data" state.
+    r = its_readout(_noisy_series(30, 30, seed=2))
+    assert r.status == "INSUFFICIENT_HISTORY"
+    assert (r.lift, r.ci_low, r.ci_high, r.p_value) == (None, None, None, None)
+    assert r.direction == "INCONCLUSIVE"
+    assert r.n_pre == 30 and r.n_post == 30
 
 
 def test_insufficient_never_fabricates():

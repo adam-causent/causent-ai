@@ -23,20 +23,29 @@ _BASE = 738000  # arbitrary ordinal-day offset; centering absorbs it
 _NO_FIRE = PlaceboResult("OK", 0.0, False)
 _FIRED = PlaceboResult("OK", 9.9, True)
 
+# A benign Durbin-Watson (~2 = no residual autocorrelation): the DW belief cap only
+# bites on strongly autocorrelated fits, so the default constructed OK result is clean.
+_DW_OK = 2.0
 
-def _its(status, lift, direction, ci_low=None, ci_high=None):
-    """Construct an ITSResult for the branches C4 can't be coaxed to emit cleanly."""
-    return ITSResult("ITS", status, lift, ci_low, ci_high, direction, 30, 30, 1.0, 1.0)
+
+def _its(status, lift, direction, ci_low=None, ci_high=None, dw=_DW_OK):
+    """Construct an ITSResult for the branches C4 can't be coaxed to emit cleanly.
+    n_pre/n_post are at/above FLOOR_CONFIDENT so an OK status is invariant-consistent."""
+    return ITSResult("ITS", status, lift, ci_low, ci_high, direction, 50, 50, 1.0, 1.0,
+                     1.0, dw)
 
 
 # ---------- golden: KNOWN truth recovered by C4, then mapped ----------
 
 @pytest.mark.parametrize("step,direction", [(8.0, "POSITIVE"), (-8.0, "NEGATIVE")])
 def test_significant_step_is_full_belief(step, direction):
-    n_pre, n_post = 40, 40
+    # A large step over adequate history with light iid noise: CI clears 0, residuals
+    # are white (DW ~ 2), the placebo is clean -> the full-belief 1.0 branch.
+    rng = np.random.default_rng(3)
+    n_pre, n_post = 50, 50
     dates = _BASE + np.arange(n_pre + n_post)
-    vals = 5.0 + 0.3 * np.arange(n_pre + n_post)
-    vals[n_pre:] += step  # noise-free -> tight CI that excludes 0
+    vals = 5.0 + 0.3 * np.arange(n_pre + n_post) + rng.normal(0.0, 0.5, n_pre + n_post)
+    vals[n_pre:] += step
     its = its_readout(Series(dates, vals, split=n_pre))
     assert its.status == "OK" and its.direction == direction  # C4 recovered the truth
 
@@ -48,7 +57,7 @@ def test_significant_step_is_full_belief(step, direction):
 def test_zero_effect_with_noise_is_half_belief():
     # A true zero step under noise: C4 stays OK but its CI includes 0 -> 0.5.
     rng = np.random.default_rng(7)
-    n_pre, n_post = 40, 40
+    n_pre, n_post = 50, 50
     dates = _BASE + np.arange(n_pre + n_post)
     vals = 5.0 + 0.3 * np.arange(n_pre + n_post) + rng.normal(0.0, 1.0, n_pre + n_post)
     its = its_readout(Series(dates, vals, split=n_pre))
@@ -66,6 +75,14 @@ def test_insufficient_is_null_belief():
     assert b.belief_score is None  # unknown, NOT zero
     assert b.direction == "INCONCLUSIVE"
     assert b.reason is None
+
+
+def test_insufficient_history_is_null_belief_gathering_data():
+    # Fittable but below FLOOR_CONFIDENT: withheld (None), reason marks "gathering data".
+    b = belief_direction(_its("INSUFFICIENT_HISTORY", None, "INCONCLUSIVE"), _NO_FIRE)
+    assert b.belief_score is None
+    assert b.direction == "INCONCLUSIVE"
+    assert b.reason == "INSUFFICIENT_HISTORY"
 
 
 def test_degenerate_is_null_unknown_not_zero():
@@ -94,6 +111,26 @@ def test_placebo_fired_flips_significant_belief_to_zero():
     falsified = belief_direction(its, _FIRED)
     assert survived == Belief(1.0, "POSITIVE")           # placebo clean -> full belief
     assert falsified == Belief(0.0, "INCONCLUSIVE", "PLACEBO")  # SAME its, flipped
+
+
+def test_strong_autocorrelation_caps_confident_belief_at_half():
+    # OK readout, CI excludes 0, placebo clean — but a low Durbin-Watson says the
+    # residuals are too autocorrelated for HAC to be trusted at this n, so belief is
+    # capped at 0.5 (reason AUTOCORRELATION) rather than fabricating a 1.0.
+    its = _its("OK", 8.0, "POSITIVE", ci_low=6.0, ci_high=10.0, dw=0.6)
+    b = belief_direction(its, _NO_FIRE)
+    assert b == Belief(0.5, "INCONCLUSIVE", "AUTOCORRELATION")
+    # A missing DW is treated as unconfirmable -> also capped, never 1.0.
+    assert belief_direction(_its("OK", 8.0, "POSITIVE", ci_low=6.0, ci_high=10.0, dw=None),
+                            _NO_FIRE).belief_score == 0.5
+
+
+def test_placebo_not_evaluable_withholds_confident_belief():
+    # CI excludes 0, DW clean, but the placebo could not be evaluated (too little
+    # pre-history to falsify): withhold the confident 1.0, drop to 0.5.
+    its = _its("OK", 8.0, "POSITIVE", ci_low=6.0, ci_high=10.0)
+    b = belief_direction(its, PlaceboResult("INSUFFICIENT", None, False))
+    assert b == Belief(0.5, "INCONCLUSIVE")
 
 
 def test_placebo_does_not_resurrect_insufficient_or_degenerate():
@@ -135,6 +172,7 @@ def test_total_over_every_status():
     # Totality: every Status maps to a defined belief; no crash, no undefined score.
     expected = {
         "INSUFFICIENT": Belief(None, "INCONCLUSIVE"),
+        "INSUFFICIENT_HISTORY": Belief(None, "INCONCLUSIVE", "INSUFFICIENT_HISTORY"),
         "DEGENERATE": Belief(None, "INCONCLUSIVE", "DEGENERATE"),
         "CONFOUNDED": Belief(0.0, "INCONCLUSIVE"),
     }

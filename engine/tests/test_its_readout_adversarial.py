@@ -4,16 +4,17 @@ These are written by a reviewer who did NOT write the component. The goal is to
 falsify the contract:
 
   its_readout(series) -> ITSResult
-    * gate n_pre>=14 and n_post>=14 else INSUFFICIENT
+    * gate n_pre>=14 and n_post>=14 else INSUFFICIENT (unfittable)
     * run segmented_ols; if fit.degenerate -> DEGENERATE
+    * fittable but a side < FLOOR_CONFIDENT (45) -> INSUFFICIENT_HISTORY (withheld)
     * else step_ci -> lift + CI; direction = sign(lift) when CI excludes 0
       else INCONCLUSIVE; fill n_pre/n_post/resid_var/cond_number.
     * NEVER returns a fabricated number.
 
 scipy is the TEST-ONLY oracle (lstsq + inv + t.ppf), independent of the numpy
-engine. Attack axes: n=14 vs 13 boundary, degenerate -> DEGENERATE, CI straddling
-0 -> INCONCLUSIVE, strong negative -> NEGATIVE (not low-belief), and byte-level
-NaN/inf leakage into results.
+engine. Attack axes: the fit / floor / confident boundaries, degenerate ->
+DEGENERATE, CI straddling 0 -> INCONCLUSIVE, strong negative -> NEGATIVE (not
+low-belief), and byte-level NaN/inf leakage into results.
 """
 
 import math
@@ -89,30 +90,31 @@ def _assert_finite_or_none(x):
 # ======================================================================
 
 @pytest.mark.parametrize("n_pre,n_post,expect", [
-    (14, 14, "OK"),
-    (14, 15, "OK"),
-    (15, 14, "OK"),
-    (13, 14, "INSUFFICIENT"),
+    (13, 14, "INSUFFICIENT"),           # below MIN_SIDE -> unfittable
     (14, 13, "INSUFFICIENT"),
     (13, 13, "INSUFFICIENT"),
     (13, 40, "INSUFFICIENT"),
     (40, 13, "INSUFFICIENT"),
-    (14, 100, "OK"),
+    (14, 14, "INSUFFICIENT_HISTORY"),   # fittable, below the confident floor
+    (14, 100, "INSUFFICIENT_HISTORY"),  # one side short of FLOOR_CONFIDENT
+    (44, 44, "INSUFFICIENT_HISTORY"),
+    (45, 45, "OK"),                     # at the confident floor
+    (60, 45, "OK"),
 ])
 def test_boundary_gate_exhaustive(n_pre, n_post, expect):
     # Give the fittable cases real signal + noise so an OK verdict is meaningful.
     r = its_readout(_make(n_pre, n_post, [1.0, 0.1, 3.0], sigma=0.5, seed=3))
     assert r.status == expect
-    # Counts must always reflect the true split, even when INSUFFICIENT.
+    # Counts must always reflect the true split, even when withheld.
     assert r.n_pre == n_pre
     assert r.n_post == n_post
     if expect != "OK":
         _assert_no_fabrication_when_not_ok(r)
 
 
-def test_boundary_14_14_actually_fits_and_matches_oracle():
-    # Exactly at the floor with clean signal: must recover the truth, not bail.
-    s = _make(14, 14, [2.0, 0.2, 4.0], sigma=0.0)
+def test_boundary_floor_45_45_fits_and_matches_oracle():
+    # Exactly at the confident floor with clean signal: must recover the truth, not bail.
+    s = _make(45, 45, [2.0, 0.2, 4.0, 0.0], sigma=0.0)
     r = its_readout(s)
     assert r.status == "OK"
     assert r.lift == pytest.approx(4.0, abs=1e-6)
@@ -133,11 +135,11 @@ def test_gate_uses_size_minus_split_not_a_stored_field():
 # ======================================================================
 
 @pytest.mark.parametrize("n_pre,n_post,truth,sigma,seed", [
-    (50, 45, [2.0, 0.3, 5.0, -0.1], 1.5, 7),    # 4-coeff (both >= 28)
-    (30, 30, [1.0, 0.05, 3.0, 0.0], 2.0, 11),   # 4-coeff, weaker
-    (20, 20, [1.0, 0.1, 4.0], 1.0, 5),          # 3-coeff (both < 28)
-    (28, 20, [0.0, 0.0, -6.0], 1.2, 9),         # asymmetric -> 3-coeff
-    (28, 28, [3.0, -0.2, 2.5, 0.05], 0.8, 2),   # exactly 28/28 -> 4-coeff
+    (50, 45, [2.0, 0.3, 5.0, -0.1], 1.5, 7),    # above the floor
+    (45, 45, [1.0, 0.05, 3.0, 0.0], 2.0, 11),   # at the floor, weaker
+    (60, 60, [1.0, 0.1, 4.0, 0.0], 1.0, 5),
+    (80, 45, [0.0, 0.0, -6.0, 0.0], 1.2, 9),    # asymmetric, both >= floor
+    (45, 80, [3.0, -0.2, 2.5, 0.05], 0.8, 2),
 ])
 def test_lift_and_ci_match_scipy(n_pre, n_post, truth, sigma, seed):
     s = _make(n_pre, n_post, truth, sigma=sigma, seed=seed)
@@ -153,8 +155,8 @@ def test_direction_always_agrees_with_oracle_ci():
     # Sweep many random draws; readout's direction must match what the oracle CI says.
     rng = np.random.default_rng(0)
     for _ in range(200):
-        n_pre = int(rng.integers(15, 40))
-        n_post = int(rng.integers(15, 40))
+        n_pre = int(rng.integers(45, 90))
+        n_post = int(rng.integers(45, 90))
         step = float(rng.uniform(-6, 6))
         sigma = float(rng.uniform(0.5, 4.0))
         seed = int(rng.integers(0, 10_000))
@@ -177,7 +179,7 @@ def test_direction_always_agrees_with_oracle_ci():
 
 def test_strong_negative_is_negative_not_inconclusive():
     # Large negative step, tiny noise: CI must clear 0 on the negative side.
-    s = _make(30, 30, [5.0, 0.0, -9.0], sigma=0.3, seed=4)
+    s = _make(50, 50, [5.0, 0.0, -9.0, 0.0], sigma=0.3, seed=4)
     r = its_readout(s)
     assert r.status == "OK"
     assert r.lift < 0.0
@@ -187,7 +189,7 @@ def test_strong_negative_is_negative_not_inconclusive():
 
 
 def test_strong_positive_is_positive():
-    s = _make(30, 30, [1.0, 0.0, 9.0], sigma=0.3, seed=6)
+    s = _make(50, 50, [1.0, 0.0, 9.0, 0.0], sigma=0.3, seed=6)
     r = its_readout(s)
     assert r.direction == "POSITIVE"
     assert r.lift > 0.0
@@ -196,7 +198,7 @@ def test_strong_positive_is_positive():
 def test_ci_straddling_zero_is_inconclusive_but_still_reports_lift():
     # Tiny true effect drowned in noise -> CI straddles 0 -> INCONCLUSIVE,
     # yet lift/CI are still REAL numbers (honest, not None): status stays OK.
-    s = _make(20, 20, [1.0, 0.0, 0.05], sigma=5.0, seed=8)
+    s = _make(50, 50, [1.0, 0.0, 0.05, 0.0], sigma=5.0, seed=8)
     r = its_readout(s)
     assert r.status == "OK"
     _, o_lo, o_hi = _oracle(s)
@@ -209,7 +211,7 @@ def test_ci_straddling_zero_is_inconclusive_but_still_reports_lift():
 
 def test_exact_null_step_is_inconclusive_at_zero_noise():
     # Zero true step, zero noise: lift == 0 exactly, CI == (0,0), not POSITIVE/NEGATIVE.
-    s = _make(20, 20, [3.0, 0.4, 0.0], sigma=0.0)
+    s = _make(50, 50, [3.0, 0.4, 0.0, 0.0], sigma=0.0)
     r = its_readout(s)
     assert r.status == "OK"
     assert r.lift == pytest.approx(0.0, abs=1e-9)
@@ -223,7 +225,7 @@ def test_hac_curbs_false_positives_under_autocorrelation():
     draws = 1500
     hac_fp = iid_fp = 0
     for i in range(draws):
-        s = _make(30, 30, truth, sigma=2.0, seed=100_000 + i, rho=0.8)
+        s = _make(50, 50, truth, sigma=2.0, seed=100_000 + i, rho=0.8)
         r = its_readout(s)
         assert r.status == "OK" and r.lift is not None
         hac_fp += r.direction != "INCONCLUSIVE"
@@ -345,7 +347,7 @@ def test_result_shape_invariants_over_random_and_pathological_inputs():
     for s in cases:
         r = its_readout(s)
         assert r.method == "ITS"
-        assert r.status in ("OK", "INSUFFICIENT", "DEGENERATE")
+        assert r.status in ("OK", "INSUFFICIENT", "INSUFFICIENT_HISTORY", "DEGENERATE")
         assert r.direction in ("POSITIVE", "NEGATIVE", "INCONCLUSIVE")
         # lift present iff OK; and it is a bijection with status here.
         if r.status == "OK":
@@ -384,7 +386,7 @@ def test_negative_direction_never_paired_with_positive_ci():
     rng = np.random.default_rng(77)
     for _ in range(150):
         step = float(rng.uniform(-8, 8))
-        s = _make(25, 25, [1.0, 0.0, step], sigma=float(rng.uniform(0.3, 3.0)),
+        s = _make(50, 50, [1.0, 0.0, step, 0.0], sigma=float(rng.uniform(0.3, 3.0)),
                   seed=int(rng.integers(0, 9999)))
         r = its_readout(s)
         if r.direction == "POSITIVE":

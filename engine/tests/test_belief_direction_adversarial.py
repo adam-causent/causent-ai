@@ -23,31 +23,37 @@ from scipy import stats
 
 from causal.belief_direction import belief_direction
 from causal.its_readout import its_readout
-from causal.types import Belief, ITSResult, PlaceboResult, Series
+from causal.types import (
+    DW_CONFIDENT_MIN, FLOOR_CONFIDENT, Belief, ITSResult, PlaceboResult, Series,
+)
 from hac_oracle import hac_cov
 
 _BASE = 738000
-_STATUSES = ["OK", "INSUFFICIENT", "DEGENERATE", "CONFOUNDED"]
+_STATUSES = ["OK", "INSUFFICIENT", "INSUFFICIENT_HISTORY", "DEGENERATE", "CONFOUNDED"]
 _DIRECTIONS = ["POSITIVE", "NEGATIVE", "INCONCLUSIVE"]
 
 # A placebo that did NOT fire — the readout survives falsification. The scipy oracle
-# below models the ITS->belief map only, so we always feed it a non-firing placebo and
-# test the placebo GATE separately.
+# below models the ITS->belief map with a clean placebo, so we always feed it a
+# non-firing placebo and test the placebo GATE separately.
 _NO_FIRE = PlaceboResult("OK", 0.0, False)
 _FIRED = PlaceboResult("OK", 42.0, True)
 
 
-def _its(status, lift, direction, ci_low=None, ci_high=None):
-    return ITSResult("ITS", status, lift, ci_low, ci_high, direction, 30, 30, 1.0, 1.0)
+def _its(status, lift, direction, ci_low=None, ci_high=None, dw=2.0):
+    # n_pre/n_post at the confident floor + a benign DW (~2) so a constructed OK result
+    # is invariant-consistent and not spuriously capped by the autocorrelation guard.
+    return ITSResult("ITS", status, lift, ci_low, ci_high, direction, 50, 50, 1.0, 1.0,
+                     1.0, dw)
 
 
 # ---------- scipy oracle for the whole ITS -> belief pipeline ----------
 
 def _scipy_belief(series: Series) -> Belief:
-    """Independently derive the belief C8 *should* produce, using scipy for the CI.
+    """Independently derive the belief C8 *should* produce (with a clean placebo).
 
-    Rebuilds the exact segmented design of C2, solves OLS, forms the 95% t-interval
-    on the step coefficient with scipy.stats.t, then applies C8's documented map.
+    Rebuilds the exact segmented design of C2, solves OLS, forms the 95% t-interval on
+    the step coefficient with scipy.stats.t over the dof-corrected HAC cov, then applies
+    C8's documented map including the FLOOR_CONFIDENT and Durbin-Watson guards.
     """
     y = series.values.astype(np.float64)
     t = series.dates.astype(np.float64)
@@ -71,20 +77,25 @@ def _scipy_belief(series: Series) -> Belief:
     if rank < k or cond > 1e10 or df <= 0 or y.var() < 1e-10:
         return Belief(None, "INCONCLUSIVE", "DEGENERATE")  # DEGENERATE => UNKNOWN
 
+    if n_pre < FLOOR_CONFIDENT or n_post < FLOOR_CONFIDENT:
+        return Belief(None, "INCONCLUSIVE", "INSUFFICIENT_HISTORY")  # gathering data
+
     resid = y - X @ coeffs
     cov = hac_cov(X, resid)
     step = coeffs[2]
     half = stats.t.ppf(0.975, df) * np.sqrt(cov[2, 2])
     lo, hi = step - half, step + half
 
-    if lo > 0.0:
-        return Belief(1.0, "POSITIVE")
-    if hi < 0.0:
-        return Belief(1.0, "NEGATIVE")
-    return Belief(0.5, "INCONCLUSIVE")
+    if not (lo > 0.0 or hi < 0.0):
+        return Belief(0.5, "INCONCLUSIVE")  # CI includes 0
+    ss = float(resid @ resid)
+    dw = float(np.sum(np.diff(resid) ** 2) / ss) if ss > 0.0 else 2.0
+    if dw < DW_CONFIDENT_MIN:
+        return Belief(0.5, "INCONCLUSIVE", "AUTOCORRELATION")  # too autocorrelated to trust
+    return Belief(1.0, "POSITIVE" if lo > 0.0 else "NEGATIVE")
 
 
-def _series(step, n_pre=40, n_post=40, noise=0.0, seed=0, slope=0.3):
+def _series(step, n_pre=50, n_post=50, noise=0.0, seed=0, slope=0.3):
     rng = np.random.default_rng(seed)
     dates = _BASE + np.arange(n_pre + n_post)
     vals = 5.0 + slope * np.arange(n_pre + n_post)
@@ -103,6 +114,8 @@ def test_total_and_ignores_leaked_direction(status, direction):
     b = belief_direction(_its(status, 123.4, direction, ci_low=100.0, ci_high=146.0), _NO_FIRE)
     if status == "INSUFFICIENT":
         assert b == Belief(None, "INCONCLUSIVE")
+    elif status == "INSUFFICIENT_HISTORY":
+        assert b == Belief(None, "INCONCLUSIVE", "INSUFFICIENT_HISTORY")  # gathering data
     elif status == "DEGENERATE":
         assert b == Belief(None, "INCONCLUSIVE", "DEGENERATE")  # unusable => UNKNOWN
     elif status == "CONFOUNDED":
@@ -122,6 +135,8 @@ def test_placebo_only_gates_an_ok_readout(status, direction):
         assert b == Belief(0.0, "INCONCLUSIVE", "PLACEBO")
     elif status == "INSUFFICIENT":
         assert b == Belief(None, "INCONCLUSIVE")
+    elif status == "INSUFFICIENT_HISTORY":
+        assert b == Belief(None, "INCONCLUSIVE", "INSUFFICIENT_HISTORY")
     elif status == "DEGENERATE":
         assert b == Belief(None, "INCONCLUSIVE", "DEGENERATE")
     else:
@@ -173,7 +188,7 @@ def test_noisy_zero_effect_agrees_with_scipy(seed):
 def test_borderline_effect_agrees_with_scipy(seed):
     # Small effect near the detection threshold — the region where a flawed
     # significance mapping would flip 0.5<->1.0.
-    series = _series(1.0, noise=3.0, seed=200 + seed, n_pre=30, n_post=30)
+    series = _series(1.0, noise=3.0, seed=200 + seed, n_pre=50, n_post=50)
     got = belief_direction(its_readout(series), _NO_FIRE)
     oracle = _scipy_belief(series)
     assert got == oracle, f"seed {seed}: C8={got} scipy={oracle}"
