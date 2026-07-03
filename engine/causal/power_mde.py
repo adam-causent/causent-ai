@@ -12,7 +12,7 @@ Contract: power_mde(series, target_frac, alpha, power) -> PowerResult.
   var = residual variance of a linear (level + slope) detrend of the pre-history,
         df = n_pre - 2.
   mde = (t_ppf(1-alpha/2, df) + t_ppf(power, df)) * sqrt(var * (1/n_pre + 1/n_pre)).
-  underpowered = mde > target_frac * mean(pre).
+  underpowered = mde > target_frac * abs(mean(pre)).
 
 Invariant: too little pre-history to detrend (n_pre < 3), a non-finite value in
 the pre-window, or a rank-deficient time axis has no defensible MDE -> mde=None
@@ -57,4 +57,4 @@ def power_mde(series: Series, target_frac: float = 0.05,
 
     mde = (t_ppf(1.0 - alpha / 2.0, float(df)) + t_ppf(power, float(df))) \
         * sqrt(var * (2.0 / n_pre))
-    return PowerResult(mde, mde > target_frac * float(pre.mean()))
+    return PowerResult(mde, mde > target_frac * abs(float(pre.mean())))

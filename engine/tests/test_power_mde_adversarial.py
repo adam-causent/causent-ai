@@ -5,10 +5,10 @@ Strategy:
   * Robustness/degenerate/boundary inputs must never crash or fabricate an mde.
   * scipy (linregress + t.ppf) is an independent TEST-ONLY oracle for the numeric
     estimate across a fuzz of seeds and df sizes (df = 1 .. large).
-  * The two xfail(strict=True) tests at the bottom encode the component's OWN
-    stated semantics ("any effect detectable", "smallest effect we'd care about")
-    and FAIL against the shipped code — they pin a real defect in the
-    `underpowered` decision for negative-baseline metrics.
+  * The two tests at the bottom encode the component's OWN stated semantics
+    ("any effect detectable", "smallest effect we'd care about") for
+    negative-baseline metrics — they pin the |mean| threshold fix (C7 defect,
+    previously xfail).
 """
 
 import math
@@ -181,23 +181,18 @@ def test_bad_power_raises(power):
 # |mean(pre)|, not its sign. Root cause: `target_frac * float(pre.mean())`
 # should be `target_frac * abs(float(pre.mean()))`.
 
-@pytest.mark.xfail(strict=True, reason="C7 defect: signed threshold flags every "
-                   "negative-baseline series underpowered (should use |mean|).")
 def test_zero_variance_negative_baseline_is_not_underpowered():
     # Perfectly linear, negative baseline: mde == 0.0 => any effect detectable,
-    # so the metric CANNOT be underpowered. Shipped code returns True.
+    # so the metric CANNOT be underpowered.
     pre = -100.0 - 2.0 * np.arange(40)
     res = power_mde(_series(pre))
     assert res.mde == pytest.approx(0.0, abs=1e-6)
     assert res.underpowered is False
 
 
-@pytest.mark.xfail(strict=True, reason="C7 defect: clean negative-baseline series "
-                   "with mde << |mean| still flagged underpowered.")
 def test_clean_negative_baseline_series_is_well_powered():
     # Flat baseline at -50 with tiny noise: mde ~ 0.01, magnitude threshold
-    # 0.05 * 50 = 2.5, so mde << target => clearly well powered. Shipped code
-    # computes threshold 0.05 * (-50) = -2.5 and flags underpowered=True.
+    # 0.05 * 50 = 2.5, so mde << target => clearly well powered.
     rng = np.random.default_rng(3)
     pre = -50.0 + rng.normal(0.0, 0.02, 60)
     res = power_mde(_series(pre), target_frac=0.05)
