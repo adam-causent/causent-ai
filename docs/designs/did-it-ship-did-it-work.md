@@ -233,6 +233,72 @@ New scope vs the PRD: the 14-day before/after method + the method registry seam
 (small, accepted — gives a naive-vs-rigorous cross-check); per-action rows change
 the clustering semantics (overlay, not node-replacement).
 
+## v1 UI — Information Architecture (design review, 2026-07-02)
+
+**Supersedes** the PRD's "1 home canvas + 3 tabs (Actions/Impact/Metrics)" and the
+"Causal Graph Canvas as the home surface." The graph canvas is **demoted from hero
+to a drill-down**; the persistent spine is now a **core-metric time series with
+action flags**. Deliberate change, user-directed.
+
+**Persistent top bar:** Causent logo/wordmark (brand palette: teal `#00A29C`, blue
+`#377DED`, amber `#F0B73E`, grey `#595959`) + 3 tabs that stay present across the
+whole flow.
+
+**Tabs (renamed, workflow order):**
+- **Tab 1 — Data Workshop:** upload a CSV (and, later, additional connectors) as a
+  core metric. The metric-onboarding surface.
+- **Tab 2 — Actions & Decisions:** connect GitHub (and later connectors) to input
+  what the *action* is, plus an explanation of the decision-making behind it. Future:
+  collaborative decision + analysis.
+- **Tab 3 — Impact:** actions listed in a **table with an aggregated impact at the
+  top**; a visualization (the core-metric time series, or a horizontal +/- impact
+  bar chart); **volume + % change** per core metric (up to 5). Future: drill-down
+  into each stat's causal calculation, plus A/B setups.
+
+**Persistent bottom Core Metrics drawer (present on every tab):**
+- Each core metric renders as a **daily time series** with **actions layered on top
+  as named flags** — giving the user the felt sense of progress/improvement over time.
+- **Stats box on the right** of the drawer: layer additional metrics on top; capped
+  at **5 metrics max** for v1.
+- Always visible and checkable — the core metrics "run through everything," always in
+  the background, constantly checkable.
+
+**Time is implicit throughout:** core metrics are always a time series; actions are
+flags on that timeline. This is the organizing metaphor.
+
+**Deferred (future iterations):** collaborative decision/analysis on Tab 2;
+per-stat causal-calc drill-down + A/B setups on Tab 3; connectors beyond CSV + GitHub;
+more than 5 core metrics; the full free-form causal graph as a primary surface.
+
+## v1 UI — Design Review resolutions (2026-07-02)
+
+Initial design completeness rated 5/10; raised via visual mockups + IA redesign.
+Approved reference mockups (gstack designer):
+`~/.gstack/projects/adam-causent-causent-ai/designs/causent-shell-20260702/`
+(remix-1 = Impact shell; tab-data-workshop; tab-actions-decisions; approved.json).
+
+Resolved findings:
+- **Colorblind accessibility (was the sharpest miss):** direction is triple-encoded —
+  glyph (▲/▼/–) + position + color + value label — never color alone.
+- **Trust hierarchy:** the readout leads with "Estimated impact — not proven" +
+  method (OLS ITS); the naive method is labeled "descriptive" and visually secondary.
+- **Credible uncertainty:** insufficient/no-clear-effect/confounded/placebo-N/A each
+  get a distinct, honest treatment; an explicit "No Material Impact" neutral state.
+- **IA redesign (user-directed):** two-tier top (global header row: account /
+  New Project / Create Report, above the 3 tabs); tabs = Data Workshop /
+  Actions & Decisions / Impact; persistent bottom Core Metrics drawer
+  (5-metric cap, daily time series with named action flags, stats box). Data
+  Workshop = CSV upload; Actions & Decisions = action list + rich-text
+  "why we built it" editor. "Actions" table (not "Shipped Actions (Merged PRs)");
+  Core Metrics chart legend removed.
+- **Brand:** logo/palette from causent.ai — teal `#00A29C`, blue `#377DED`,
+  amber `#F0B73E`, grey `#595959`. Drop the real `logo.svg` in at build.
+
+Deferred: Data Workshop + Actions & Decisions get plain v1 treatments now;
+collaborative decision/analysis, per-stat causal drill-down, and A/B setups are
+future iterations. Known mockup glitch: remix-1's "Neutral Impact" card shows a
+`/bin/zsh` placeholder — real value is `$0`/count.
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
@@ -240,11 +306,11 @@ the clustering semantics (overlay, not node-replacement).
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | clean | SELECTIVE_EXPANSION; 3 proposed, 3 accepted; 2 critical gaps, both tasked (T-ERR, T-RLS) |
 | Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | not installed |
 | Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | clean | 4 findings, all folded (endpoint auth, E1 runtime, batch/registry contract, LLM eval); 0 critical gaps |
-| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | not run |
+| Design Review | `/plan-design-review` | UI/UX gaps | 1 | clean | 5/10 → approved; colorblind-safe encoding, trust hierarchy, IA redesign (3 tabs + drawer), mockups approved |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | n/a |
 
-- **OUTSIDE VOICE:** Codex not installed → Claude adversarial subagent. CEO phase: 2 iterations, 7/10 → 8/10, 15 issues fixed. Eng phase: 6/10 — 1 substantive cross-model tension (2-method registry vs "no zoo"), surfaced to the user; 7 mitigations/hardening items folded as tasks (ET11–ET17).
-- **CROSS-MODEL:** Outside voice argued ITS-only; user chose to display both methods (per-action rows + registry) with the required mitigations (methodology enum, authoritative-method belief key, one-authoritative-per-edge rendering, disagreement rule+eval). Decision recorded, not overridden.
-- **VERDICT:** CEO + ENG CLEARED — ready to implement. **T0 (bare numpy OLS + t-PPF proof) is the gating first task**; 4 engine decisions are contingent on it. Run `/plan-design-review` next for the graph-canvas UI.
+- **OUTSIDE VOICE:** Codex not installed → Claude adversarial subagent. CEO phase: 2 iterations, 7/10 → 8/10, 15 issues fixed. Eng phase: 6/10 — 1 cross-model tension (2-method registry vs "no zoo"), surfaced; 7 mitigations folded (ET11–ET17).
+- **CROSS-MODEL:** Outside voice argued ITS-only; user chose to display both methods with the required mitigations (methodology enum, authoritative-method belief key, one-authoritative-per-edge rendering, disagreement rule+eval). Recorded, not overridden.
+- **VERDICT:** CEO + ENG + DESIGN CLEARED — ready to implement. **T0 (bare numpy OLS + t-PPF proof) is the gating first task**; 4 engine decisions are contingent on it.
 
 NO UNRESOLVED DECISIONS
