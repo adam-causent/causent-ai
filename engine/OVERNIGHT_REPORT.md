@@ -61,3 +61,64 @@ adversarial defects, both fixed.
    - **DEGENERATE → belief 0.0:** decide whether a degenerate solve should read as "no effect" (0.0) or "unknown" (NULL/None). Currently indistinguishable from CONFOUNDED.
    - **E1 power_mde n:** reconcile `n_pre` with the ±14-day window before the "underpowered" warning ships, or it will clear too early and undercut the "estimated, not proven" promise.
    - **Multiple-comparison policy:** decide FDR/Bonferroni (or an explicit "no correction, exploratory" stance) before fanning one metric across 200 actions in the UI.
+
+## Causal-honesty fix (2026-07-03)
+
+Four commits on `overnight/foundation` targeted the panel's headline blocker:
+
+- **HAC SEs** (`e5b9b29`): replaced iid `resid_var * pinv(X'X)` with a Newey-West
+  Bartlett-kernel sandwich (auto lag `floor(4*(n/100)^(2/9))`) in `segmented_ols`;
+  Durbin-Watson + lag stored on `Fit`; `step_ci` now also emits a step p-value.
+  HAC formula is textbook-correct and matches an independent `hac_oracle.py` (golden
+  tests pass).
+- **Placebo gates belief + FDR + semantics** (`c9120e8`): `belief_direction` now
+  reads the placebo; `batch_readout` applies BH-FDR (only ever demotes 1.0→0.5);
+  `DEGENERATE`→`None` (NULL, no longer conflated with CONFOUNDED's 0.0); `power_mde`
+  reconciled to the ±14-day window `n`.
+- **Hygiene** (`077a3df`): `np.errstate` guard for the non-finite-date warning;
+  single-source 14-day window floor.
+- **AR(1) coverage gate** (`bd66c09`): new `test_autocorrelation_coverage.py` — an
+  objective Monte-Carlo gate (5000 nulls/level) requiring the null false-positive
+  rate (95% CI excludes zero ⇒ would emit belief 1.0) ≤ 0.08 at every ρ.
+
+**Coverage-gate result — RED.** The engine's own gate FAILS. Observed null FP rates:
+**0.135 at ρ=0.0, 0.197 at ρ=0.5, 0.274 at ρ=0.8** (gate 0.08). belief=1.0 still fires
+on pure noise 13–27% of the time, and the placebo-gated belief rate **equals** the raw
+FP rate exactly (placebo removes zero false positives). It even over-rejects under white
+noise (fixed-n probe: 17.5% at n=28, ρ=0), so the lag-3 kernel made low-ρ *worse* than
+plain OLS-t. Power sanity check passes (belief fires on a real large step). Full suite:
+**4 failed, 1010 passed** — the 4 failures are the coverage gate itself.
+
+**Root causes:** (1) HAC has no small-sample correction (no `n/(n-k)` dof adjustment,
+no prewhitening/fixed-b) → the sandwich is severely downward-biased at the engine's
+n=28–60 regime while `step_ci` still uses the generous `t_{n-k}` critical value.
+(2) The placebo is structurally inert: `split//2` placement forces `split ≥ 56`
+(n ≥ ~112 days) before a window can be built, so on every realistic v1 series it returns
+INSUFFICIENT and fires 0.0% of the time. (3) Durbin-Watson is computed/stored but never
+consumed — it gates nothing. (4) BH-FDR runs on anti-conservative p-values and is a no-op
+for single-action (m=1) families.
+
+**Re-judge:**
+
+| Reviewer (re-review) | Round-1 | Round-2 | Signs off? |
+|----------------------|:-------:|:-------:|:----------:|
+| Senior data scientist | 4/10 | **4/10** | No — "DO NOT SIGN OFF" |
+| Causal-inference researcher | 5/10 | **3/10** | No — "NO SIGN-OFF" |
+
+Both confirm the round-1 blocker is empirically still present and cite the RED coverage
+gate. The researcher dropped 5→3 (shipped the fix red).
+
+**Verdict: STILL BLOCKED — not safe to merge.** Real progress landed (correct HAC formula
+vs oracle, DW computed, BH-FDR, DEGENERATE→NULL semantics, ~27 net new tests, and the
+objective coverage gate itself), but belief=1.0 still fires on pure autocorrelated noise
+13–27% of the time and the engine's own gate is failing.
+
+**Remaining issues before merge:**
+1. Add a small-sample HAC correction (`n/(n-k)` dof, or KVB/fixed-b critical values, or a
+   block bootstrap) so CIs are honest at n=28–60 — re-tune until the coverage gate passes.
+2. Make the placebo actually fire in the operating regime: choose a placebo split that
+   fits 14-pre + 14-post within available pre-history, or surface an explicit
+   "placebo not evaluable" state instead of silent non-firing.
+3. Consume Durbin-Watson in a decision (widen/withhold) rather than only displaying it.
+4. Note BH-FDR does not restore its guarantee on anti-conservative p-values and is a no-op
+   for single-action families.
