@@ -18,6 +18,7 @@ from scipy import linalg as sla
 
 from causal.segmented_ols import segmented_ols
 from causal.types import Fit, Series
+from hac_oracle import hac_cov
 
 _BASE = 738000
 _COND_MAX = 1e10
@@ -37,13 +38,16 @@ def _design(dates, split):
     return np.column_stack(cols)
 
 
-def _make(n_pre, n_post, truth, sigma=0.0, seed=0):
+def _make(n_pre, n_post, truth, sigma=0.0, seed=0, rho=0.0):
     n = n_pre + n_post
     dates = _BASE + np.arange(n)
     X = _design(dates, n_pre)
     y = X @ np.asarray(truth, float)
     if sigma:
-        y = y + np.random.default_rng(seed).normal(0.0, sigma, n)
+        e = np.random.default_rng(seed).normal(0.0, sigma, n)
+        for i in range(1, n):  # AR(1): rho=0 leaves it iid
+            e[i] += rho * e[i - 1]
+        y = y + e
     return Series(dates=dates, values=y, split=n_pre)
 
 
@@ -102,12 +106,11 @@ def test_matches_scipy_oracle_randomized(seed):
     beta, *_ = sla.lstsq(X, s.values)
     dof = s.values.size - X.shape[1]
     resid = s.values - X @ beta
-    cov = (resid @ resid / dof) * sla.inv(X.T @ X)
 
     assert not fit.degenerate
     assert fit.coeffs == pytest.approx(beta, rel=1e-7, abs=1e-7)
     assert fit.resid_var == pytest.approx(resid @ resid / dof, rel=1e-8)
-    assert fit.cov == pytest.approx(cov, rel=1e-6, abs=1e-9)
+    assert fit.cov == pytest.approx(hac_cov(X, resid), rel=1e-6, abs=1e-9)
 
 
 def test_cond_number_matches_numpy_cond_of_design():
@@ -117,8 +120,9 @@ def test_cond_number_matches_numpy_cond_of_design():
     assert fit.cond_number == pytest.approx(float(np.linalg.cond(X)), rel=1e-6)
 
 
-def test_step_se_is_calibrated_monte_carlo():
-    # Independent MC: empirical std of the step estimate == reported SE.
+def test_step_se_tracks_spread_monte_carlo():
+    # Independent MC: under white noise the HAC SE recovers the empirical spread
+    # of the step estimate to within its finite-sample band; the estimate is unbiased.
     truth = [0.0, 0.05, 3.0, 0.0]
     sigma, draws = 1.5, 3000
     est = np.empty(draws)
@@ -127,8 +131,8 @@ def test_step_se_is_calibrated_monte_carlo():
         fit = segmented_ols(_make(30, 30, truth, sigma=sigma, seed=5000 + i))
         est[i] = fit.coeffs[2]
         rep[i] = np.sqrt(fit.cov[2, 2])
-    assert est.mean() == pytest.approx(truth[2], abs=0.15)      # unbiased
-    assert est.std() == pytest.approx(rep.mean(), rel=0.06)     # calibrated
+    assert est.mean() == pytest.approx(truth[2], abs=0.15)   # unbiased
+    assert 0.78 <= rep.mean() / est.std() <= 1.02            # tracks the true spread
 
 
 # --------------------------------------------------------------------------

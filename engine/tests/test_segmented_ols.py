@@ -12,6 +12,7 @@ from scipy import linalg as sla
 
 from causal.segmented_ols import segmented_ols
 from causal.types import Series
+from hac_oracle import hac_cov, hac_lag
 
 _BASE = 738000  # arbitrary ordinal-day offset; centering must absorb it
 
@@ -26,13 +27,16 @@ def _design(dates, split):
     return np.column_stack(cols)
 
 
-def _make(n_pre, n_post, truth, sigma=0.0, seed=0):
+def _make(n_pre, n_post, truth, sigma=0.0, seed=0, rho=0.0):
     n = n_pre + n_post
     dates = _BASE + np.arange(n)
     X = _design(dates, n_pre)
     y = X @ np.asarray(truth, float)
     if sigma:
-        y = y + np.random.default_rng(seed).normal(0.0, sigma, n)
+        e = np.random.default_rng(seed).normal(0.0, sigma, n)
+        for i in range(1, n):  # AR(1): rho=0 leaves it iid
+            e[i] += rho * e[i - 1]
+        y = y + e
     return Series(dates=dates, values=y, split=n_pre)
 
 
@@ -63,16 +67,16 @@ def test_matches_scipy_oracle():
     X = _design(s.dates, s.split)
     beta, *_ = sla.lstsq(X, s.values)
     assert fit.coeffs == pytest.approx(beta, rel=1e-8, abs=1e-8)
-    # covariance: sigma^2 * inv(X'X), independent inverse.
+    # covariance: Newey-West HAC sandwich, independently reconstructed.
     dof = s.values.size - X.shape[1]
     resid = s.values - X @ beta
-    cov = (resid @ resid / dof) * sla.inv(X.T @ X)
-    assert fit.cov == pytest.approx(cov, rel=1e-7, abs=1e-9)
+    assert fit.cov == pytest.approx(hac_cov(X, resid), rel=1e-7, abs=1e-9)
     assert fit.resid_var == pytest.approx(resid @ resid / dof, rel=1e-9)
 
 
-def test_cov_matches_monte_carlo():
-    # The reported SE of the step must match its empirical spread over noise draws.
+def test_step_se_tracks_spread_and_widens_under_autocorrelation():
+    # White noise: the reported HAC SE recovers the empirical spread of the step
+    # estimate to within the finite-sample Newey-West band; the estimate is unbiased.
     truth = [1.0, 0.1, 4.0, 0.0]
     sigma, draws = 2.0, 4000
     est = np.empty(draws)
@@ -81,8 +85,46 @@ def test_cov_matches_monte_carlo():
         fit = segmented_ols(_make(35, 35, truth, sigma=sigma, seed=i))
         est[i] = fit.coeffs[2]
         reported[i] = np.sqrt(fit.cov[2, 2])
-    assert est.mean() == pytest.approx(truth[2], abs=0.1)      # unbiased
-    assert est.std() == pytest.approx(reported.mean(), rel=0.05)  # calibrated SE
+    assert est.mean() == pytest.approx(truth[2], abs=0.1)   # unbiased
+    assert 0.78 <= reported.mean() / est.std() <= 1.02      # tracks the true spread
+
+    # Autocorrelation: the true spread balloons; the HAC SE follows it and is
+    # substantially wider than the iid SE, which ignores the serial correlation.
+    hac_se = np.empty(draws)
+    iid_se = np.empty(draws)
+    for i in range(draws):
+        s = _make(35, 35, truth, sigma=sigma, seed=i, rho=0.8)
+        fit = segmented_ols(s)
+        X = _design(s.dates, s.split)
+        resid = s.values - X @ fit.coeffs
+        dof = s.values.size - X.shape[1]
+        hac_se[i] = np.sqrt(fit.cov[2, 2])
+        iid_se[i] = np.sqrt((resid @ resid / dof) * sla.inv(X.T @ X)[2, 2])
+    assert hac_se.mean() > 1.25 * iid_se.mean()  # HAC widens for autocorrelation
+
+
+# ---------- diagnostics: Durbin-Watson + Bartlett lag ----------
+
+def test_durbin_watson_flags_autocorrelation():
+    # White noise -> DW ~ 2 (no serial correlation); strong AR(1) -> DW well below 2.
+    dw_white = np.mean([
+        segmented_ols(_make(200, 200, [0.0, 0.0, 1.0, 0.0], sigma=2.0, seed=i)).durbin_watson
+        for i in range(40)
+    ])
+    dw_ar = np.mean([
+        segmented_ols(_make(200, 200, [0.0, 0.0, 1.0, 0.0], sigma=2.0, seed=i, rho=0.7)).durbin_watson
+        for i in range(40)
+    ])
+    assert dw_white == pytest.approx(2.0, abs=0.2)
+    assert dw_ar < 1.0  # positive autocorrelation pushes DW toward 0
+
+
+@pytest.mark.parametrize("n", [56, 100, 150, 400])
+def test_hac_lag_matches_bartlett_rule(n):
+    half = n // 2
+    fit = segmented_ols(_make(half, n - half, [1.0, 0.1, 2.0, 0.0], sigma=1.0, seed=1))
+    assert fit.hac_lag == hac_lag(n)
+    assert fit.hac_lag == int(np.floor(4.0 * (n / 100.0) ** (2.0 / 9.0)))
 
 
 def test_resid_var_recovers_noise():

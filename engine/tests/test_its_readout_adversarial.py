@@ -25,6 +25,7 @@ from scipy import stats
 
 from causal.its_readout import its_readout
 from causal.types import ITSResult, Series
+from hac_oracle import hac_cov
 
 _BASE = 738000
 
@@ -43,17 +44,17 @@ def _design(dates, split):
 
 
 def _oracle(series, alpha=0.05):
-    """Return (lift, ci_low, ci_high) end-to-end from scipy, independent of engine."""
+    """Return (lift, ci_low, ci_high) from an independent oracle: scipy + HAC cov."""
     X = _design(series.dates, series.split)
     beta, *_ = sla.lstsq(X, series.values)
     dof = series.values.size - X.shape[1]
     resid = series.values - X @ beta
-    cov = (resid @ resid / dof) * sla.inv(X.T @ X)
+    cov = hac_cov(X, resid)
     half = stats.t.ppf(1.0 - alpha / 2.0, dof) * math.sqrt(cov[2, 2])
     return beta[2], beta[2] - half, beta[2] + half
 
 
-def _make(n_pre, n_post, truth, sigma=0.0, seed=0):
+def _make(n_pre, n_post, truth, sigma=0.0, seed=0, rho=0.0):
     n = n_pre + n_post
     dates = _BASE + np.arange(n)
     X = _design(dates, n_pre)
@@ -62,7 +63,10 @@ def _make(n_pre, n_post, truth, sigma=0.0, seed=0):
     b[: min(len(truth), X.shape[1])] = np.asarray(truth, float)[: X.shape[1]]
     y = X @ b
     if sigma:
-        y = y + np.random.default_rng(seed).normal(0.0, sigma, n)
+        e = np.random.default_rng(seed).normal(0.0, sigma, n)
+        for i in range(1, n):  # AR(1): rho=0 leaves it iid
+            e[i] += rho * e[i - 1]
+        y = y + e
     return Series(dates=dates, values=y, split=n_pre)
 
 
@@ -72,6 +76,7 @@ def _assert_no_fabrication_when_not_ok(r: ITSResult):
     assert r.lift is None
     assert r.ci_low is None
     assert r.ci_high is None
+    assert r.p_value is None
     assert r.direction == "INCONCLUSIVE"
 
 
@@ -211,15 +216,24 @@ def test_exact_null_step_is_inconclusive_at_zero_noise():
     assert r.direction == "INCONCLUSIVE"  # ci_low>0 False, ci_high<0 False
 
 
-def test_null_false_positive_rate_matches_nominal_alpha():
+def test_hac_curbs_false_positives_under_autocorrelation():
+    # Under an autocorrelated null, HAC must fire spuriously less than the naive
+    # iid readout — the concrete blocker the covariance change exists to fix.
     truth = [1.0, 0.05, 0.0, 0.0]
     draws = 1500
-    fp = 0
+    hac_fp = iid_fp = 0
     for i in range(draws):
-        r = its_readout(_make(30, 30, truth, sigma=2.0, seed=100_000 + i))
+        s = _make(30, 30, truth, sigma=2.0, seed=100_000 + i, rho=0.8)
+        r = its_readout(s)
         assert r.status == "OK" and r.lift is not None
-        fp += r.direction != "INCONCLUSIVE"
-    assert fp / draws == pytest.approx(0.05, abs=0.025)
+        hac_fp += r.direction != "INCONCLUSIVE"
+        X = _design(s.dates, s.split)
+        beta, *_ = sla.lstsq(X, s.values)
+        dof = s.values.size - X.shape[1]
+        resid = s.values - X @ beta
+        se = math.sqrt((resid @ resid / dof) * sla.inv(X.T @ X)[2, 2])
+        iid_fp += abs(beta[2]) > stats.t.ppf(0.975, dof) * se
+    assert hac_fp < iid_fp - 0.05 * draws
 
 
 # ======================================================================

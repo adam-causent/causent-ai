@@ -25,6 +25,7 @@ from scipy import stats
 
 from causal.placebo_in_time import placebo_in_time
 from causal.types import PlaceboResult, Series
+from hac_oracle import hac_cov
 
 _BASE = 738000
 _WINDOW = 14
@@ -49,7 +50,7 @@ def _oracle_readout(dates, values, split, alpha=0.05):
     beta, *_ = sla.lstsq(X, values)
     dof = values.size - X.shape[1]
     resid = values - X @ beta
-    cov = (resid @ resid / dof) * sla.inv(X.T @ X)
+    cov = hac_cov(X, resid)
     half = stats.t.ppf(1.0 - alpha / 2.0, dof) * math.sqrt(cov[2, 2])
     step = beta[2]
     return step, (step - half) > 0.0 or (step + half) < 0.0

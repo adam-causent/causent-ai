@@ -16,6 +16,7 @@ from scipy import stats
 from causal.segmented_ols import segmented_ols
 from causal.step_ci import step_ci
 from causal.types import Fit, Series
+from hac_oracle import hac_cov
 
 _BASE = 738000  # arbitrary ordinal-day offset; centering absorbs it
 
@@ -30,23 +31,37 @@ def _design(dates, split):
     return np.column_stack(cols)
 
 
-def _make(n_pre, n_post, truth, sigma=0.0, seed=0):
+def _make(n_pre, n_post, truth, sigma=0.0, seed=0, rho=0.0):
     n = n_pre + n_post
     dates = _BASE + np.arange(n)
     X = _design(dates, n_pre)
     y = X @ np.asarray(truth, float)
     if sigma:
-        y = y + np.random.default_rng(seed).normal(0.0, sigma, n)
+        e = np.random.default_rng(seed).normal(0.0, sigma, n)
+        for i in range(1, n):  # AR(1): rho=0 leaves it iid
+            e[i] += rho * e[i - 1]
+        y = y + e
     return Series(dates=dates, values=y, split=n_pre)
 
 
-def _oracle_ci(series, alpha=0.05):
-    """CI computed end-to-end from scipy: independent lstsq + inv + t.ppf."""
+def _iid_ci(series, alpha=0.05):
+    """The naive iid-OLS interval — kept only to show HAC beats it under autocorrelation."""
     X = _design(series.dates, series.split)
     beta, *_ = sla.lstsq(X, series.values)
     dof = series.values.size - X.shape[1]
     resid = series.values - X @ beta
     cov = (resid @ resid / dof) * sla.inv(X.T @ X)
+    half = stats.t.ppf(1.0 - alpha / 2.0, dof) * math.sqrt(cov[2, 2])
+    return beta[2] - half, beta[2] + half
+
+
+def _oracle_ci(series, alpha=0.05):
+    """CI end-to-end from an independent oracle: scipy lstsq + t.ppf, HAC cov."""
+    X = _design(series.dates, series.split)
+    beta, *_ = sla.lstsq(X, series.values)
+    dof = series.values.size - X.shape[1]
+    resid = series.values - X @ beta
+    cov = hac_cov(X, resid)
     half = stats.t.ppf(1.0 - alpha / 2.0, dof) * math.sqrt(cov[2, 2])
     return beta[2] - half, beta[2] + half
 
@@ -81,9 +96,10 @@ def test_matches_oracle_across_alpha(alpha):
 
 # ---------- golden: recovery of a KNOWN truth via coverage ----------
 
-def test_coverage_is_nominal():
-    # The defining property of a 95% CI: over many draws it covers the true
-    # step ~95% of the time. This recovers a known truth (the coverage rate).
+def test_coverage_white_noise_near_nominal():
+    # Under iid residuals the HAC interval is still ~nominal; the small-sample
+    # Newey-West downward bias costs a few points of coverage at n=70 — a known,
+    # honest cost of buying autocorrelation-robustness. Not the fabricated 0.95.
     truth = [1.0, 0.1, 4.0, 0.0]
     step = truth[2]
     draws = 3000
@@ -91,9 +107,25 @@ def test_coverage_is_nominal():
     for i in range(draws):
         lo, hi = step_ci(segmented_ols(_make(35, 35, truth, sigma=2.0, seed=i)))
         covered += lo <= step <= hi
-    rate = covered / draws
-    # binomial SE at p=.95, n=3000 is ~0.004; allow a comfortable ±3 SE band.
-    assert rate == pytest.approx(0.95, abs=0.015)
+    assert 0.86 <= covered / draws <= 0.96
+
+
+def test_hac_restores_coverage_under_autocorrelation():
+    # The whole point of HAC: with positively autocorrelated residuals the naive
+    # iid interval understates SEs and badly under-covers; HAC widens and recovers
+    # much of the lost coverage. HAC must strictly beat iid by a clear margin.
+    truth = [1.0, 0.1, 4.0, 0.0]
+    step = truth[2]
+    draws = 2000
+    hac = iid = 0
+    for i in range(draws):
+        s = _make(35, 35, truth, sigma=2.0, seed=i, rho=0.8)
+        lo, hi = step_ci(segmented_ols(s))
+        hac += lo <= step <= hi
+        lo2, hi2 = _iid_ci(s)
+        iid += lo2 <= step <= hi2
+    assert hac > iid + 0.08 * draws   # HAC clearly better under AR(1)
+    assert iid / draws < 0.60         # iid catastrophically under-covers
 
 
 # ---------- structure & monotonicity ----------

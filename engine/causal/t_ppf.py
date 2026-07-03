@@ -92,6 +92,18 @@ def _betainc(a: float, b: float, x: float) -> float:
     return 1.0 - front * _betacf(b, a, 1.0 - x) / b
 
 
+def t_two_sided_p(t: float, df: float) -> float:
+    """Two-sided p-value P(|T| > |t|) for T ~ Student-t(df).
+
+    Uses the identity P(|T| > t) = I_x(df/2, 1/2) with x = df/(df+t^2), reusing the
+    same regularized incomplete beta that backs t_ppf. t=0 -> 1.0, |t|->inf -> 0.0.
+    """
+    if not df > 0.0:
+        raise ValueError(f"df must be > 0, got {df!r}")
+    x = df / (df + t * t)
+    return _betainc(0.5 * df, 0.5, x)
+
+
 def t_ppf(p: float, df: float) -> float:
     if not df > 0.0:                       # also rejects nan
         raise ValueError(f"df must be > 0, got {df!r}")

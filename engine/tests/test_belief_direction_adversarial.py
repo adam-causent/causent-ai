@@ -24,6 +24,7 @@ from scipy import stats
 from causal.belief_direction import belief_direction
 from causal.its_readout import its_readout
 from causal.types import Belief, ITSResult, Series
+from hac_oracle import hac_cov
 
 _BASE = 738000
 _STATUSES = ["OK", "INSUFFICIENT", "DEGENERATE", "CONFOUNDED"]
@@ -65,8 +66,7 @@ def _scipy_belief(series: Series) -> Belief:
         return Belief(0.0, "INCONCLUSIVE")  # DEGENERATE
 
     resid = y - X @ coeffs
-    resid_var = resid @ resid / df
-    cov = resid_var * np.linalg.pinv(X.T @ X)
+    cov = hac_cov(X, resid)
     step = coeffs[2]
     half = stats.t.ppf(0.975, df) * np.sqrt(cov[2, 2])
     lo, hi = step - half, step + half

@@ -37,12 +37,14 @@ class Fit:
     """Output of segmented_ols (C2). Raw enough for the learning loop to reuse."""
 
     coeffs: np.ndarray        # [level, pre_slope, step, (post_slope?)]
-    cov: np.ndarray           # coefficient covariance matrix
+    cov: np.ndarray           # Newey-West HAC covariance (autocorrelation-robust)
     resid_var: float
     cond_number: float
     n_pre: int
     n_post: int
     degenerate: bool          # rank-deficient / below variance floor
+    durbin_watson: float = float("nan")  # residual autocorrelation diagnostic (~2 = none)
+    hac_lag: int = 0          # Bartlett-kernel truncation lag used for the HAC cov
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,7 @@ class ITSResult:
     n_post: int
     resid_var: float | None
     cond_number: float | None
+    p_value: float | None = None  # two-sided p for the step (HAC SE); None unless OK
 
 
 @dataclass(frozen=True)

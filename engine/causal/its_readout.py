@@ -9,16 +9,18 @@ Contract: its_readout(series) -> ITSResult, method "ITS".
   - segmented_ols degenerate    -> DEGENERATE   (rank / condition / variance)
   - otherwise                   -> OK: lift = step coefficient with a 95% CI;
     direction = sign(lift) when the CI excludes 0, else INCONCLUSIVE.
-  lift/ci are None unless status is OK; n_pre/n_post are always real counts;
-  resid_var/cond_number carry the fit diagnostics (None if non-finite).
+  lift/ci are None unless status is OK; p_value is the two-sided step p from the
+  HAC SE (None unless OK); n_pre/n_post are always real counts; resid_var/
+  cond_number carry the fit diagnostics (None if non-finite).
 """
 
 from __future__ import annotations
 
-from math import isfinite
+from math import isfinite, sqrt
 
 from causal.segmented_ols import segmented_ols
 from causal.step_ci import step_ci
+from causal.t_ppf import t_two_sided_p
 from causal.types import ITSResult, Series
 
 _MIN_SIDE = 14  # per-side floor; 14 + 14 = the 28-point minimum for a readout
@@ -49,5 +51,12 @@ def its_readout(series: Series) -> ITSResult:
     else:
         direction = "INCONCLUSIVE"
 
+    df = fit.n_pre + fit.n_post - int(fit.coeffs.size)
+    se = sqrt(float(fit.cov[2, 2]))
+    if se > 0.0:
+        p_value = t_two_sided_p(lift / se, float(df))
+    else:  # perfect (zero-variance) fit: any non-zero step is certain
+        p_value = 1.0 if lift == 0.0 else 0.0
+
     return ITSResult("ITS", "OK", lift, ci_low, ci_high, direction,
-                     fit.n_pre, fit.n_post, resid_var, cond)
+                     fit.n_pre, fit.n_post, resid_var, cond, p_value)

@@ -2,7 +2,8 @@
 
 Why: the authoritative readout (C4) reports the level shift with honest
 uncertainty. This turns C2's raw solve into a two-sided (1-alpha) interval
-using the fitted covariance and the t critical value C1 owns.
+using the fitted covariance (C2's autocorrelation-robust Newey-West HAC cov)
+and the t critical value C1 owns.
 
 Contract: step_ci(fit, alpha) -> (low, high) for the step coefficient
   (coeffs[2]) at confidence 1-alpha. Interval = step ± t_ppf(1-alpha/2, df) *
