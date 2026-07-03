@@ -61,18 +61,19 @@ def segmented_ols(series: Series) -> Fit:
     split = int(series.split)
     n_pre, n_post = split, n - split
 
-    finite = np.isfinite(y).all() and np.isfinite(t).all()
-    post = np.arange(n) >= split
-    tc = (t - t.mean()) if finite else np.zeros(n)
-    cols = [np.ones(n), tc, post.astype(np.float64)]
-    if n_pre >= _MIN_SEG and n_post >= _MIN_SEG:
-        cols.append(np.where(post, t - t[split], 0.0) if finite else np.zeros(n))
-    X = np.column_stack(cols)
-    k = X.shape[1]
+    has_post_slope = n_pre >= _MIN_SEG and n_post >= _MIN_SEG
+    k = 4 if has_post_slope else 3
 
-    if n < k or not finite:
+    # Guard before any arithmetic: non-finite data (or too few points) can't be fit.
+    if n < k or not (np.isfinite(y).all() and np.isfinite(t).all()):
         return Fit(np.zeros(k), np.zeros((k, k)), float("inf"),
                    float("inf"), n_pre, n_post, True)
+
+    post = np.arange(n) >= split
+    cols = [np.ones(n), t - t.mean(), post.astype(np.float64)]
+    if has_post_slope:
+        cols.append(np.where(post, t - t[split], 0.0))
+    X = np.column_stack(cols)
 
     coeffs, _, rank, s = np.linalg.lstsq(X, y, rcond=None)
     resid = y - X @ coeffs

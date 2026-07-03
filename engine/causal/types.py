@@ -14,6 +14,10 @@ import numpy as np
 Direction = Literal["POSITIVE", "NEGATIVE", "INCONCLUSIVE"]
 Method = Literal["ITS", "BEFORE_AFTER_14D", "MANUAL"]
 
+# Per-side day floor for a readout: 14 pre + 14 post = the 28-point minimum.
+# Single source of truth for C4 (its_readout), C5 (before_after_14d), C6 (placebo_in_time), C7 (power_mde).
+MIN_SIDE = 14
+
 # Why a belief was withheld/downgraded, when it wasn't a plain OK projection.
 # PLACEBO: a firing placebo-in-time falsified an otherwise-credible readout.
 # DEGENERATE: the fit was unusable, so the effect is UNKNOWN (score None), not zero.

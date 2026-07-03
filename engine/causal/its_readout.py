@@ -21,16 +21,14 @@ from math import isfinite, sqrt
 from causal.segmented_ols import segmented_ols
 from causal.step_ci import step_ci
 from causal.t_ppf import t_two_sided_p
-from causal.types import ITSResult, Series
-
-_MIN_SIDE = 14  # per-side floor; 14 + 14 = the 28-point minimum for a readout
+from causal.types import MIN_SIDE, ITSResult, Series
 
 
 def its_readout(series: Series) -> ITSResult:
     n_pre = int(series.split)
     n_post = int(series.values.size) - n_pre
 
-    if n_pre < _MIN_SIDE or n_post < _MIN_SIDE:
+    if n_pre < MIN_SIDE or n_post < MIN_SIDE:
         return ITSResult("ITS", "INSUFFICIENT", None, None, None,
                          "INCONCLUSIVE", n_pre, n_post, None, None)
 

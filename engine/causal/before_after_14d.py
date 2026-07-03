@@ -23,33 +23,32 @@ from math import isfinite, sqrt
 import numpy as np
 
 from causal.t_ppf import t_ppf
-from causal.types import BeforeAfterResult, Series
+from causal.types import MIN_SIDE, BeforeAfterResult, Series
 
-_WINDOW = 14
 _ALPHA = 0.05
 
 
 def before_after_14d(series: Series) -> BeforeAfterResult:
     split = int(series.split)
     n = int(series.values.size)
-    if split < _WINDOW or n - split < _WINDOW:
+    if split < MIN_SIDE or n - split < MIN_SIDE:
         return BeforeAfterResult("BEFORE_AFTER_14D", "INSUFFICIENT", None, None, None)
 
-    pre = series.values[split - _WINDOW:split].astype(np.float64)
-    post = series.values[split:split + _WINDOW].astype(np.float64)
+    pre = series.values[split - MIN_SIDE:split].astype(np.float64)
+    post = series.values[split:split + MIN_SIDE].astype(np.float64)
     if not (np.isfinite(pre).all() and np.isfinite(post).all()):
         return BeforeAfterResult("BEFORE_AFTER_14D", "DEGENERATE", None, None, None)
 
     lift = float(post.mean() - pre.mean())
     # Welch: unequal-variance SE + Satterthwaite df on ddof=1 sample variances.
-    vp = float(pre.var(ddof=1)) / _WINDOW
-    vq = float(post.var(ddof=1)) / _WINDOW
+    vp = float(pre.var(ddof=1)) / MIN_SIDE
+    vq = float(post.var(ddof=1)) / MIN_SIDE
     se = sqrt(vp + vq)
     if se == 0.0:                       # both windows constant: exact, zero-width
         return BeforeAfterResult("BEFORE_AFTER_14D", "OK", lift, lift, lift)
 
     try:
-        df = (vp + vq) ** 2 / (vp * vp + vq * vq) * (_WINDOW - 1)
+        df = (vp + vq) ** 2 / (vp * vp + vq * vq) * (MIN_SIDE - 1)
     except OverflowError:
         df = float("inf")
     if not (isfinite(se) and isfinite(df)):   # a poisoned/overflow value degrades this one action, never throws

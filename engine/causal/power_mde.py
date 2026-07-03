@@ -36,9 +36,7 @@ from math import isfinite, sqrt
 import numpy as np
 
 from causal.t_ppf import t_ppf
-from causal.types import PowerResult, Series
-
-_WINDOW = 14  # per-side day floor of the readout window (shared with C4/C5/C6)
+from causal.types import MIN_SIDE, PowerResult, Series
 
 
 def power_mde(series: Series, target_frac: float = 0.05,
@@ -65,7 +63,7 @@ def power_mde(series: Series, target_frac: float = 0.05,
     if not isfinite(var):
         return PowerResult(None, True)
 
-    n_win = min(n_pre, _WINDOW)  # fixed +/-14-day readout window caps the power
+    n_win = min(n_pre, MIN_SIDE)  # fixed +/-14-day readout window caps the power
     mde = (t_ppf(1.0 - alpha / 2.0, float(df)) + t_ppf(power, float(df))) \
         * sqrt(var * (2.0 / n_win))
     return PowerResult(mde, mde > target_frac * abs(float(pre.mean())))

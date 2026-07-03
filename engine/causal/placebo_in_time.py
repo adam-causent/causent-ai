@@ -25,15 +25,13 @@ own significant CI even when the real readout is INSUFFICIENT (nothing to compar
 from __future__ import annotations
 
 from causal.its_readout import its_readout
-from causal.types import ITSResult, PlaceboResult, Series
-
-_WINDOW = 14  # per-side day floor, shared with C4/C5
+from causal.types import MIN_SIDE, ITSResult, PlaceboResult, Series
 
 
 def placebo_in_time(series: Series, real: ITSResult | None = None) -> PlaceboResult:
     split = int(series.split)
     placebo_split = split // 2  # midpoint of the pre-history
-    if placebo_split < _WINDOW or split - placebo_split < 2 * _WINDOW:
+    if placebo_split < MIN_SIDE or split - placebo_split < 2 * MIN_SIDE:
         return PlaceboResult("INSUFFICIENT", None, False)
 
     placebo = its_readout(
