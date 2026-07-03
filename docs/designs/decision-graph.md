@@ -35,11 +35,26 @@ data model and the roadmap of intelligence built on top. It will grow.
 ## Storage: the tables (v1)
 
 ```
-SCOPE HIERARCHY  (the ML spine)
+SCOPE HIERARCHY  (the ML spine + the access-control spine)
   orgs        (org_id PK, name, created_at)
   projects    (project_id PK, org_id FK→orgs, name, created_at)          e.g. "Orbit"
   workspaces  (workspace_id PK, project_id FK→projects, name, created_at) e.g. "Gummy Alpha"
   # every table below carries scope_id → workspaces (the operating level in v1)
+
+MEMBERSHIP / RBAC  (what makes RLS enforceable across the hierarchy)
+  memberships (membership_id PK, user_id FK→auth.users,
+               org_id FK→orgs,                    # always set (the tenant)
+               project_id FK?→projects,           # NULL = grant applies org-wide
+               workspace_id FK?→workspaces,        # NULL = applies to whole project/org
+               role∈{owner,admin,member,viewer},
+               invited_by, created_at,
+               UNIQUE (user_id, org_id, project_id, workspace_id))
+  # A membership row grants `role` at the most specific non-NULL scope and INHERITS
+  # downward: an org-level admin admins every project/workspace under it; a
+  # workspace-level viewer sees only that workspace. RLS resolves access by checking
+  # for a membership whose scope covers the row's scope_id.
+  # Roles: owner (billing + delete + members), admin (manage data + members),
+  #        member (create/edit actions, metrics, rationale), viewer (read-only).
 
 METRICS  (the time-series spine)
   metrics             (metric_id PK, scope_id FK, name, source∈{csv,connector},
@@ -145,7 +160,9 @@ grey (0.0), placebo-N/A = "trust unverified".
 ## Invariants (do not break)
 
 - Evidence is **append-only**; belief is a projection, never a stored mutation.
-- Every row is scoped; **RLS on every table** by scope membership.
+- Every row is scoped; **RLS on every table** resolves access via the `memberships`
+  table (a membership whose scope covers the row's `scope_id`, at a sufficient role).
+  Auth flows, roles, and the full policy live in `docs/designs/security-and-auth.md`.
 - The causal engine is **stateless compute** — it receives the RLS-scoped series as
   data and holds no DB credentials (it must not self-query with the service role).
 - One **authoritative method** per edge decides direction + belief; others are detail.

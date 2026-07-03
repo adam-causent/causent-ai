@@ -310,6 +310,23 @@ collaborative decision/analysis, per-stat causal drill-down, and A/B setups are
 future iterations. Known mockup glitch: remix-1's "Neutral Impact" card shows a
 `/bin/zsh` placeholder — real value is `$0`/count.
 
+## Security & Auth (v1)
+
+Canonical doc: **`docs/designs/security-and-auth.md`** (threat model, auth flows, RBAC,
+RLS policy, secrets, task list). Key v1 decisions:
+
+- **Login is multi-provider** (supersedes the office-hours PRD's GitHub-only): Supabase
+  Auth with **email (magic link + password), Google OAuth, GitHub OAuth, and SSO
+  (SAML/OIDC per-org)**. **Email/SSO are now in v1 scope.**
+- **GitHub is decoupled** from login — it's a *connected data source* (repo read),
+  authorized separately from the session, so non-engineer teammates can use the product.
+- **RBAC via a `memberships` table** (user × scope × role: owner/admin/member/viewer)
+  over the org → project → workspace hierarchy; **RLS on every table** resolves access
+  through it. *(New: closes the access-control gap the hierarchy created.)*
+- Secrets in **Supabase Vault**; the causal engine holds no DB creds (RLS not bypassed);
+  engine endpoint shared-secret + rate limit; GitHub text untrusted in LLM prompts.
+- New P1 tasks: **SEC1** memberships+RLS, **SEC2** multi-provider auth (see security doc).
+
 ## Data Model (v1)
 
 The decision/causal graph is the core company asset and has its own living document:
