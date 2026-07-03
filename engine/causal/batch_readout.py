@@ -3,15 +3,17 @@
 Why: the pipeline runs ONE engine call per metric and gets back one row per action
 (decision-graph.md, step 3). Each action shares the metric's daily series but has its
 own intervention point (its effective_date -> `split`). This fans that shared series
-out into a per-action ITS readout, its descriptive cross-check, its placebo check, and
-the belief projection — the exact ActionReadout rows the edge/evidence writer consumes.
+out into a per-action ITS readout, the always-on descriptive stat, its before/after
+cross-check, its placebo check, and the belief projection — the exact ActionReadout rows
+the edge/evidence writer consumes.
 
 Contract: batch_readout(series, action_splits, max_actions=200, q=0.05)
   -> list[ActionReadout], one per (action_ref, split), in input order. For each action
   we build the per-action view Series(series.dates, series.values, split) and run C4
-  its_readout, C5 before_after_14d, C6 placebo_in_time (fed the real C4 result so it
-  never recomputes it), and C8 belief_direction. ITS is authoritative: belief is
-  projected from the ITS result alone (placebo-gated), never the naive cross-check.
+  its_readout, the always-on descriptive() 7d+14d mean-diff (shown even when the ITS
+  withholds below the floor), C5 before_after_14d, C6 placebo_in_time (fed the real C4
+  result so it never recomputes it), and C8 belief_direction. ITS is authoritative:
+  belief is projected from the ITS result alone (placebo-gated), never a descriptive stat.
 
 Multiple-comparison control: running one readout per action against the SAME metric is
 a family of tests, so a per-action "CI excludes 0" (nominal p<0.05) inflates false
@@ -30,6 +32,7 @@ from __future__ import annotations
 
 from causal.before_after_14d import before_after_14d
 from causal.belief_direction import belief_direction
+from causal.descriptive import descriptive
 from causal.its_readout import its_readout
 from causal.placebo_in_time import placebo_in_time
 from causal.types import ActionReadout, Belief, Series
@@ -72,21 +75,21 @@ def batch_readout(
         view = Series(series.dates, series.values, int(split))
         its = its_readout(view)
         computed.append(
-            (action_ref, view, its, before_after_14d(view),
+            (action_ref, view, its, descriptive(view), before_after_14d(view),
              placebo_in_time(view, its))
         )
 
     # BH-FDR across the family of per-action step tests for this metric.
-    discoveries = bh_fdr([its.p_value for _, _, its, _, _ in computed], q)
+    discoveries = bh_fdr([its.p_value for _, _, its, _, _, _ in computed], q)
 
     readouts = []
-    for i, (action_ref, _, its, before_after, placebo) in enumerate(computed):
+    for i, (action_ref, _, its, desc, before_after, placebo) in enumerate(computed):
         belief = belief_direction(its, placebo)
         # A 1.0 edge must also survive multiple-comparison correction; if not, the
         # effect is not significant after FDR -> demote to 0.5 / INCONCLUSIVE.
         if belief.belief_score == 1.0 and i not in discoveries:
             belief = Belief(0.5, "INCONCLUSIVE")
         readouts.append(
-            ActionReadout(action_ref, its, before_after, placebo, belief)
+            ActionReadout(action_ref, its, desc, before_after, placebo, belief)
         )
     return readouts

@@ -17,6 +17,7 @@ from scipy import stats
 from causal.batch_readout import batch_readout, bh_fdr
 from causal.before_after_14d import before_after_14d
 from causal.belief_direction import belief_direction
+from causal.descriptive import descriptive
 from causal.its_readout import its_readout
 from causal.placebo_in_time import placebo_in_time
 from causal.types import Belief, Series
@@ -63,14 +64,14 @@ def _oracle_step(series, split):
 
 @pytest.mark.parametrize("step,direction", [(8.0, "POSITIVE"), (-8.0, "NEGATIVE")])
 def test_recovers_known_step(step, direction):
-    series = _stepped(40, 40, step)
-    [row] = batch_readout(series, [("pr-1", 40)])
+    series = _stepped(50, 50, step)
+    [row] = batch_readout(series, [("pr-1", 50)])
 
     assert row.action_ref == "pr-1"
     assert row.its.status == "OK"
     assert row.its.direction == direction
     assert row.its.lift == pytest.approx(step, abs=1e-9)
-    assert row.its.lift == pytest.approx(_oracle_step(series, 40), abs=1e-9)
+    assert row.its.lift == pytest.approx(_oracle_step(series, 50), abs=1e-9)
     assert row.belief.belief_score == 1.0
     assert row.belief.direction == direction
 
@@ -97,13 +98,28 @@ def test_rows_equal_direct_component_calls():
         assert row.belief == _expected_belief(its_list, placebos, i)
 
 
+# ---------- always-on descriptive: attached to every row, even below the floor ----------
+
+def test_descriptive_is_always_attached_even_below_floor():
+    # A below-floor action: the ITS withholds (belief None), but the descriptive 7d/14d
+    # mean-diff is still present and equals a direct descriptive() call on the view.
+    series = _stepped(20, 20, 4.0, slope=0.0)  # flat level so the mean-diff == the step
+    [row] = batch_readout(series, [("pr", 20)])
+    assert row.its.status == "INSUFFICIENT_HISTORY" and row.belief.belief_score is None
+    view = Series(series.dates, series.values, 20)
+    assert row.descriptive == descriptive(view)
+    assert row.descriptive.kind == "DESCRIPTIVE"
+    assert row.descriptive.window_7d.lift == pytest.approx(4.0, abs=1e-12)
+    assert row.descriptive.window_14d.lift == pytest.approx(4.0, abs=1e-12)
+
+
 # ---------- adversarial: belief follows ITS, never the naive cross-check ----------
 
 def test_belief_keys_off_its_not_before_after():
     # Noise around a true-zero step: ITS CI straddles 0 -> 0.5/INCONCLUSIVE. The
     # naive before/after may report a nonzero point estimate, but belief must ignore it.
-    series = _stepped(40, 40, 0.0, noise=1.0, seed=11)
-    [row] = batch_readout(series, [("pr", 40)])
+    series = _stepped(50, 50, 0.0, noise=2.0, seed=14)  # zero step, placebo stays clean
+    [row] = batch_readout(series, [("pr", 50)])
 
     assert row.its.status == "OK" and row.its.direction == "INCONCLUSIVE"
     assert row.belief.belief_score == 0.5
@@ -117,10 +133,10 @@ def test_belief_keys_off_its_not_before_after():
 def test_uses_action_split_not_series_split():
     # series.split is a bogus 10 (would be INSUFFICIENT); the action asks for 40,
     # where the real step lives. Recovering it proves the view uses the action split.
-    series = _stepped(40, 40, 8.0)
+    series = _stepped(50, 50, 8.0)
     series = Series(series.dates, series.values, split=10)  # poison the series split
 
-    [row] = batch_readout(series, [("pr", 40)])
+    [row] = batch_readout(series, [("pr", 50)])
     assert row.its.status == "OK"
     assert row.its.lift == pytest.approx(8.0, abs=1e-9)
 
@@ -152,13 +168,13 @@ def test_empty_batch_returns_empty():
 def test_mixed_good_and_degenerate_actions():
     # One recoverable action, one too-short (INSUFFICIENT), one on a flat metric slice
     # (DEGENERATE). All three must yield defined rows; the good one is unaffected.
-    n = 80
+    n = 100
     dates = _BASE + np.arange(n)
     vals = 5.0 + 0.3 * np.arange(n)
-    vals[40:] += 8.0
-    series = Series(dates, vals, split=40)
+    vals[50:] += 8.0
+    series = Series(dates, vals, split=50)
 
-    rows = batch_readout(series, [("good", 40), ("short", 5)])
+    rows = batch_readout(series, [("good", 50), ("short", 5)])
     good, short = rows
     assert good.its.status == "OK" and good.belief.belief_score == 1.0
     assert short.its.status == "INSUFFICIENT"
@@ -220,11 +236,11 @@ def test_placebo_fired_flips_a_significant_edge_to_zero():
     # jump planted at the placebo midpoint: the placebo fires, so the causal claim is
     # unverified and belief collapses to 0.0 / PLACEBO, direction nuked. End-to-end
     # proof that falsification gates belief, not just the pure C8 mapping.
-    n = 90
+    n = 120
     dates = _BASE + np.arange(n)
     vals = 5.0 + 0.3 * np.arange(n)
-    vals[30:] += 7.0   # spurious pre-period jump at the placebo midpoint -> fires
-    vals[60:] += 8.0   # real intervention effect at the split
+    vals[46:] += 7.0   # spurious jump at the placebo split (60 - 14) -> placebo fires
+    vals[60:] += 8.0   # real intervention effect at the split (n_post = 60 >= floor)
     [row] = batch_readout(Series(dates, vals, split=60), [("pr", 60)])
 
     assert row.its.status == "OK" and row.its.direction == "POSITIVE"  # C4: strong edge

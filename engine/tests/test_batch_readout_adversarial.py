@@ -196,33 +196,39 @@ def test_order_preserved_with_repeated_refs():
 # NUMERIC BOUNDARY — scipy oracle at C2's structural edges
 # ======================================================================
 
-def test_min_viable_14_14_boundary_matches_scipy():
-    # The exact 14/14 floor: n=28, k=3 (no post-slope). Must fit, not INSUFFICIENT.
-    series = _stepped(14, 14, 9.0)
-    [row] = batch_readout(series, [("edge", 14)])
+def test_min_confident_45_45_boundary_matches_scipy():
+    # The exact confident floor: 45/45 (n=90, k=4). Must fit and be OK, not withheld.
+    series = _stepped(45, 45, 9.0)
+    [row] = batch_readout(series, [("edge", 45)])
     assert row.its.status == "OK"
-    assert row.its.lift == pytest.approx(_oracle_step(series, 14), abs=1e-9)
+    assert row.its.lift == pytest.approx(_oracle_step(series, 45), abs=1e-9)
     assert row.its.lift == pytest.approx(9.0, abs=1e-9)
 
 
-def test_just_below_floor_is_insufficient():
-    # 13 on the post side: below the 14-floor -> INSUFFICIENT, belief None.
-    series = _stepped(20, 13, 9.0)
-    [row] = batch_readout(series, [("edge", 20)])
-    assert row.its.status == "INSUFFICIENT"
+@pytest.mark.parametrize("n_pre,n_post,status", [
+    (13, 20, "INSUFFICIENT"),        # below MIN_SIDE -> unfittable
+    (20, 13, "INSUFFICIENT"),
+    (30, 30, "INSUFFICIENT_HISTORY"),  # fittable but below the confident floor
+    (44, 60, "INSUFFICIENT_HISTORY"),  # one side one short of the floor
+])
+def test_below_confident_floor_withholds(n_pre, n_post, status):
+    # Below the confident floor the row is defined but withheld: no lift, belief None.
+    series = _stepped(n_pre, n_post, 9.0)
+    [row] = batch_readout(series, [("edge", n_pre)])
+    assert row.its.status == status
     assert row.its.lift is None
     assert row.belief.belief_score is None
     assert row.belief.direction == "INCONCLUSIVE"
 
 
-@pytest.mark.parametrize("n_side,k_expected", [(27, 3), (28, 4)])
-def test_post_slope_column_transition_matches_scipy(n_side, k_expected):
-    # 27/27 -> k=3, 28/28 -> k=4 (post-slope column added). A pure level shift must
-    # be recovered in BOTH designs, exactly matching an independent scipy solve.
+@pytest.mark.parametrize("n_side", [45, 70])
+def test_above_floor_uses_four_column_design_matches_scipy(n_side):
+    # Every confident (above-floor) readout uses the full k=4 segmented design; a pure
+    # level shift must be recovered exactly, matching an independent scipy solve.
     series = _stepped(n_side, n_side, 7.0)
     [row] = batch_readout(series, [("t", n_side)])
     X = _design(series.dates, n_side, 2 * n_side)
-    assert X.shape[1] == k_expected
+    assert X.shape[1] == 4
     assert row.its.status == "OK"
     assert row.its.lift == pytest.approx(_oracle_step(series, n_side), abs=1e-8)
     assert row.its.lift == pytest.approx(7.0, abs=1e-8)
