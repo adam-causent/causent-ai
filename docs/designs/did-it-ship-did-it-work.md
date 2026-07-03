@@ -266,6 +266,17 @@ whole flow.
 **Time is implicit throughout:** core metrics are always a time series; actions are
 flags on that timeline. This is the organizing metaphor.
 
+**Project hierarchy (breadcrumb on the tab row + data model):** the tab strip carries
+a project breadcrumb reading `Project: Orbit / Gummy Alpha` (a two-level
+project → workspace path). This is NOT just chrome — it namespaces every metric,
+action, and causal edge to a project scope so the deferred cross-project pattern ML
+can learn and transfer at the right level. **Schema implication:** the graph's
+`project_id` (already on `nodes`/`causal_edges`/`evidence_objects`/`actions`) gains a
+parent hierarchy — model **org → project → workspace** as first-class rows now, even
+though v1 only reads/writes at one level, so RLS scoping and the future
+belief-learning loop can operate per-level without a migration. Get the hierarchy
+right early; it is the spine the ML learnings hang on.
+
 **Deferred (future iterations):** collaborative decision/analysis on Tab 2;
 per-stat causal-calc drill-down + A/B setups on Tab 3; connectors beyond CSV + GitHub;
 more than 5 core metrics; the full free-form causal graph as a primary surface.
