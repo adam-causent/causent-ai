@@ -1,6 +1,7 @@
 // getMetrics() — the daily metric series + display config, mapped from Supabase to
 // lib/types.ts Metric. Mirrors the lib/seed.ts `metrics` export.
 
+import { cache } from "react";
 import type { Metric, Observation } from "@/lib/types";
 import { getServerSupabase } from "@/lib/supabase-server";
 import {
@@ -32,7 +33,9 @@ export type MetricRecord = { metricId: string; metric: Metric };
  * canonical metric order (lib/seed.ts). A metric whose name has no UI config is
  * skipped (we never guess a color / inversion for an unknown metric).
  */
-export async function getMetricRecords(): Promise<MetricRecord[]> {
+export const getMetricRecords = cache(async function getMetricRecords(): Promise<
+  MetricRecord[]
+> {
   const sb = getServerSupabase();
 
   const metricsRes = await sb
@@ -98,7 +101,7 @@ export async function getMetricRecords(): Promise<MetricRecord[]> {
     (a, b) => METRIC_ORDER.indexOf(a.metric.id) - METRIC_ORDER.indexOf(b.metric.id),
   );
   return records;
-}
+});
 
 /**
  * All metrics in the demo scope with their full daily series, ordered to match the

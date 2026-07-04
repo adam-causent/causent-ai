@@ -7,6 +7,7 @@
 // no FK), so PostgREST can't auto-join edges to actions/metrics. We fetch nodes,
 // edges, and evidence flat and stitch them in TS by node_id / semantic_ref.
 
+import { cache } from "react";
 import { getServerSupabase } from "@/lib/supabase-server";
 import { DEMO_SCOPE_ID } from "@/lib/data/config";
 
@@ -50,7 +51,9 @@ export function edgeKey(actionId: string, metricId: string): string {
  * CLUSTER edges are intentionally dropped here — the UI reads per action, and clusters
  * are an overlay (see engine/persistence/bridge.py). Read-only; never mutates the graph.
  */
-export async function loadEdgeReadouts(): Promise<Map<string, EdgeReadout>> {
+export const loadEdgeReadouts = cache(async function loadEdgeReadouts(): Promise<
+  Map<string, EdgeReadout>
+> {
   const sb = getServerSupabase();
 
   const [nodesRes, edgesRes, evidenceRes] = await Promise.all([
@@ -113,4 +116,4 @@ export async function loadEdgeReadouts(): Promise<Map<string, EdgeReadout>> {
     });
   }
   return out;
-}
+});
