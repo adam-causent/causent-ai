@@ -187,3 +187,63 @@ gate passes. No blockers remain. The honest-inference redesign holds the line th
 confident causal claim (belief 1.0) is staked only with ≥45 days/side, a CI excluding 0, a
 non-firing placebo, and mild-enough residual autocorrelation (DW ≥ 1.3); everything below
 that is withheld ("gathering data") or shown as an explicitly descriptive cross-check.
+
+## Persistence bridge (2026-07-03)
+
+**Design.** The bridge (`engine/persistence/bridge.py`) persists engine output into
+Supabase without giving the engine a memory. The engine stays **stateless**: it recomputes
+readouts from raw series each run and hands the bridge a pure readout; the bridge owns all
+DB shape. Every write is **RLS-scoped** to workspaces the caller is a member of — the
+engine never sees or crosses a tenant boundary. Evidence is **append-only**: each run
+inserts a fresh `evidence_objects` row per (action, method); nothing is mutated or deleted,
+so the table is an immutable audit log. Nodes, `causal_edges`, and clusters are
+**materialized** (idempotent upsert) from the **authoritative ITS** readout — the ITS row
+is the source of truth for edge direction/belief; `BEFORE_AFTER_14D` is persisted as
+evidence only and never drives an edge. Colliding actions get a **cluster overlay**: a
+`CLUSTER` node with its own `CLUSTER->METRIC` edge, while members keep their individual
+`ACTION->METRIC` edges and an `actions.cluster_id` tag.
+
+**Migration additions** (`20260703230000_bridge_support.sql`,
+`20260703234500_bridge_integrity_fixes.sql`): `evidence_objects.belief_reason` (nullable —
+carries e.g. `INSUFFICIENT_HISTORY` when belief is withheld), `evidence_objects.p_value`
+(nullable numeric), and a `methodology` enum (`ITS`, `BEFORE_AFTER_14D`) replacing free
+text so method rows are constrained at the DB.
+
+**Live E2E gate — `gate_pass = true`.** Ran against a real Supabase instance, not mocks.
+Checks passed:
+
+1. **Evidence objects** — exactly 2 method rows (ITS + BEFORE_AFTER_14D) per eligible
+   action A/B/C **and** for the B+C cluster after one run.
+2. **Append-only** — a SECOND run doubles evidence rows (8 → 16) while every run-1 row
+   survives unmutated; `authenticated` has no UPDATE/DELETE privilege on evidence (both
+   raise `InsufficientPrivilege`).
+3. **Causal edges** — exactly one `ACTION->METRIC` edge per action, all
+   `authoritative_method='ITS'`, all pointing at the single `METRIC` node.
+4. **Belief** — A: `POSITIVE` + belief_score `1.0`; B: `INCONCLUSIVE`, belief present but
+   ≠ 1.0 (`0.5`); C: belief_score `None` (withheld) + belief_reason `INSUFFICIENT_HISTORY`.
+5. **Recompute agreement** — each edge's `(direction, belief_score, reason)` equals
+   `belief_direction()` recomputed on the authoritative ITS readout, and the latest ITS
+   evidence row's `lift/ci/p_value/n_pre/n_post/placebo` match that readout.
+6. **RLS on writes** — persisting a foreign (unmembered) metric writes **nothing**
+   (0 nodes/edges/evidence/clusters in the foreign scope); a direct node INSERT into the
+   foreign scope as the user raises `InsufficientPrivilege`.
+7. **Nodes** — 1 METRIC + 3 ACTION + 1 CLUSTER; B/C collide (13 days apart ≤ 14) into one
+   CLUSTER with a `CLUSTER->METRIC` edge, members keep their `ACTION->METRIC` edges and are
+   tagged `actions.cluster_id`; A stays unclustered.
+8. **Idempotency** — a second run leaves nodes/edges/clusters counts unchanged (upsert
+   converges); beliefs stable across runs.
+
+**Integrity review: ISSUES → fixed.** The review returned an ISSUES verdict with **3
+issues**; all 3 are fixed (captured in `20260703234500_bridge_integrity_fixes.sql` and the
+bridge). No open integrity findings remain.
+
+**Merge-ready: yes.** The live E2E gate is green, RLS isolation is demonstrated against a
+real instance, append-only immutability is enforced at the privilege level, and the
+integrity issues are closed.
+
+**Residual risk (plain).** The gate exercises one canonical fixture (A unclustered, B+C
+clustered, one metric); it does not fuzz N-way cluster collisions (3+ actions inside 14d),
+concurrent runs racing the same upsert, or workspaces with many metrics. Append-only means
+the evidence table grows unbounded — no retention/compaction is in place yet. RLS is proven
+for the tested member/non-member paths but not for role-escalation or service-role misuse.
+None of these block merge; they are the next hardening pass.
