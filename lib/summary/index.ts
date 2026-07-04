@@ -20,6 +20,8 @@ export {
 
 export { generateSummary, resolveStrength, formatDelta } from "./generate.ts";
 
+export { sanitizeActionTitle } from "./redact.ts";
+
 export {
   generateSummaryWithPolish,
   enforceInvariants,

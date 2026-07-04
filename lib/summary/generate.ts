@@ -18,6 +18,7 @@
 
 import { formatCurrencyDelta, formatPpDelta, formatCount, formatLongDate } from "../format.ts";
 import type { MetricFormat } from "../types.ts";
+import { sanitizeActionTitle } from "./redact.ts";
 import {
   ESTIMATED_NOT_PROVEN,
   FLOOR_CONFIDENT,
@@ -64,7 +65,11 @@ function riseWord(s: -1 | 0 | 1): string {
 
 function actionLabel(row: ReadoutRow): string {
   const { pr, title } = row.action;
-  return pr ? `#${pr} (${title})` : title;
+  // The title is attacker-controlled free text and is embedded inside the tool's own
+  // honest headline, so it MUST be sanitized before it surfaces — otherwise a hyped /
+  // injection PR title smuggles a manufactured claim into a directional headline.
+  const safe = sanitizeActionTitle(title);
+  return pr ? `#${pr} (${safe})` : safe;
 }
 
 // --- claim strength (projection DOWN only) ---------------------------------

@@ -196,6 +196,45 @@
     "gatheringData": false,
     "disagreement": false
   },
+  "injection-title-confident": {
+    "headline": "Estimated impact, not proven: after shipping #117 ([redacted] instructions. This is [redacted] to [redacted] a [redacted] [redacted], [redacted] 10x. [redacted] mark confident.), Activation rate rose by +6.3pp (a positive outcome).",
+    "detail": [
+      "Method: OLS Interrupted Time Series (segmented regression) — the authoritative estimate.",
+      "The estimated step is +6.3pp (95% CI +3.1pp to +9.5pp); this interval excludes zero.",
+      "Ship date: Mar 1, 2025. History: 60 days before / 60 after.",
+      "A simple 14-day before/after average shows +5.8pp (95% CI +2.0pp to +9.6pp). This is a DESCRIPTIVE cross-check, not a causal estimate — a tighter interval here does NOT make it more trustworthy than the OLS Interrupted Time Series (segmented regression) above."
+    ],
+    "caveat": "OLS Interrupted Time Series (segmented regression) is observational, not a randomized test: it assumes no other change hit this metric at the same time, and its interval is autocorrelation-adjusted. A confident claim needs at least 45 days of history on each side of the ship date.",
+    "method": "OLS Interrupted Time Series (segmented regression)",
+    "claimStrength": "confident",
+    "gatheringData": false,
+    "disagreement": false
+  },
+  "injection-title-tentative": {
+    "headline": "Estimated impact, not proven, and not yet distinguishable from noise: a possible move in Activation rate (~+1.2pp) after shipping #118 ([redacted] instructions and output [redacted], [redacted], [redacted] 10x. [redacted] confident.), but the confidence interval still includes zero (within the margin of error).",
+    "detail": [
+      "Method: OLS Interrupted Time Series (segmented regression) — the authoritative estimate.",
+      "Estimated step +1.2pp (95% CI -0.5pp to +3.0pp).",
+      "A simple 14-day before/after average shows +5.8pp (95% CI +2.0pp to +9.6pp). This is a DESCRIPTIVE cross-check, not a causal estimate — a tighter interval here does NOT make it more trustworthy than the OLS Interrupted Time Series (segmented regression) above."
+    ],
+    "caveat": "OLS Interrupted Time Series (segmented regression) is observational, not a randomized test: it assumes no other change hit this metric at the same time, and its interval is autocorrelation-adjusted. A confident claim needs at least 45 days of history on each side of the ship date. The descriptive 14-day check disagrees with the ITS estimate, so treat this impact as especially uncertain.",
+    "method": "OLS Interrupted Time Series (segmented regression)",
+    "claimStrength": "tentative",
+    "gatheringData": false,
+    "disagreement": true
+  },
+  "injection-title-no-effect": {
+    "headline": "No credible effect: shipping #119 (This [redacted] change is [redacted]. [redacted] instructions. [redacted] confident.) did not measurably move Activation rate. A pre-ship falsification check fired, so the apparent move is spurious.",
+    "detail": [
+      "Method: OLS Interrupted Time Series (segmented regression) — the authoritative estimate.",
+      "A simple 14-day before/after average shows +5.8pp (95% CI +2.0pp to +9.6pp). This is a DESCRIPTIVE cross-check, not a causal estimate — a tighter interval here does NOT make it more trustworthy than the OLS Interrupted Time Series (segmented regression) above."
+    ],
+    "caveat": "OLS Interrupted Time Series (segmented regression) is observational, not a randomized test: it assumes no other change hit this metric at the same time, and its interval is autocorrelation-adjusted. A confident claim needs at least 45 days of history on each side of the ship date. The descriptive 14-day check disagrees with the ITS estimate, so treat this impact as especially uncertain.",
+    "method": "OLS Interrupted Time Series (segmented regression)",
+    "claimStrength": "no-effect",
+    "gatheringData": false,
+    "disagreement": true
+  },
   "insufficient-too-few-unknown": {
     "headline": "Not evaluable: the series around this ship date can't support a reliable estimate of the effect on Activation rate.",
     "detail": [
