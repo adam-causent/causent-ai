@@ -1,0 +1,4 @@
+# Python dependencies for the Vercel serverless function in api/*.py
+# (the "Did-It-Ship, Did-It-Work" causal engine). The Next.js build ignores this
+# file; Vercel's Python runtime installs it for the api/engine.py function.
+numpy>=1.26
