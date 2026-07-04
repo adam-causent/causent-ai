@@ -1,0 +1,47 @@
+name: CI
+
+# Re-runs every gate on every change so they stay honest (closes the
+# "point-in-time" residual risk in supabase/SCHEMA_REPORT.md): the pure engine
+# tests, the RLS tenant-isolation gate, and the bridge end-to-end gate all run
+# against a real Supabase Postgres — the same stack verified locally.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: engine + RLS + bridge gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: engine/requirements-dev.txt
+
+      - name: Install engine deps
+        run: pip install -r engine/requirements-dev.txt
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase + apply migrations
+        run: |
+          supabase start
+          supabase db reset   # clean-slate apply of supabase/migrations, mirrors local verification
+
+      - name: Full suite (engine unit + RLS isolation + bridge E2E)
+        working-directory: engine
+        run: python -m pytest -q
+
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop

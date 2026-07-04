@@ -1,3 +1,4 @@
 -r requirements.txt
 pytest>=8
-scipy>=1.11   # TEST-ONLY oracle for t_ppf; never imported by shipped code
+scipy>=1.11          # TEST-ONLY oracle for t_ppf; never imported by shipped code
+psycopg[binary]>=3.1  # TEST-ONLY: RLS isolation + bridge E2E gates hit the live DB
