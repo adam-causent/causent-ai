@@ -100,6 +100,5 @@ the design was built around.
 
 ## Housekeeping
 
-- **Rotate the OpenAI API key** pasted earlier this session (saved at `~/.gstack/openai.json`,
-  outside git; it's in the session transcript).
+- OpenAI API key **rotated 2026-07-03** (old leaked key revoked; new key in `~/.gstack/openai.json`, 600, outside git).
 - Local Supabase (Docker) may still be running; `supabase stop` to shut it down.
