@@ -109,6 +109,19 @@ test("parseIssueToAction skips not_planned, still-open, and PR-shaped issues", (
   assert.equal(parseIssueToAction(open, SCOPE), null);
 });
 
+test("parsePullRequestToAction drops (does not throw on) an unparseable merged_at", () => {
+  const merged = PULLS.find((p) => p.number === 8256)!;
+  const bad: GitHubPullRequest = { ...merged, merged_at: "not-a-date" };
+  // A single malformed timestamp must not abort the backfill — it's skipped.
+  assert.equal(parsePullRequestToAction(bad, SCOPE), null);
+});
+
+test("parseIssueToAction drops (does not throw on) an unparseable closed_at", () => {
+  const resolved = ISSUES.find((i) => i.number === 412)!;
+  const bad: GitHubIssue = { ...resolved, closed_at: "garbage" };
+  assert.equal(parseIssueToAction(bad, SCOPE), null);
+});
+
 // --- rate-limit backoff ----------------------------------------------------
 
 test("requestWithBackoff honors Retry-After, then returns the body", async () => {

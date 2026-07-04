@@ -222,9 +222,14 @@ export async function requestWithBackoff(
 // Parsing: GitHub object -> ActionRow (or null when it is not a ship event).
 // ---------------------------------------------------------------------------
 
-/** ISO-8601 UTC timestamp -> "YYYY-MM-DD" (the UTC calendar date). */
-function utcDate(iso: string): string {
-  return new Date(iso).toISOString().slice(0, 10);
+/** ISO-8601 UTC timestamp -> "YYYY-MM-DD" (the UTC calendar date), or null when
+ *  `iso` is unparseable. Returning null (rather than throwing on `.toISOString()`
+ *  of an Invalid Date) keeps one malformed ship timestamp from poisoning the whole
+ *  backfill run — the untrusted item is dropped, not fatal. */
+function utcDateOrNull(iso: string): string | null {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
 function buildRationale(
@@ -252,12 +257,14 @@ function buildRationale(
 /** A merged PR becomes an action; an unmerged (closed-without-merge) PR does not. */
 export function parsePullRequestToAction(pr: GitHubPullRequest, scopeId: string): ActionRow | null {
   if (pr.merged_at == null) return null;
+  const effective_date = utcDateOrNull(pr.merged_at);
+  if (effective_date == null) return null; // unparseable merged_at — skip, don't crash
   return {
     scope_id: scopeId,
     source: "github_pr",
     external_ref: `github:pr:${pr.number}`,
     ship_ts: pr.merged_at,
-    effective_date: utcDate(pr.merged_at),
+    effective_date,
     status: "merged",
     rationale_richtext: buildRationale(pr.title, pr.body, pr.html_url, pr.user?.login),
   };
@@ -271,12 +278,14 @@ export function parseIssueToAction(issue: GitHubIssue, scopeId: string): ActionR
   if (issue.state !== "closed") return null;
   if (issue.state_reason !== "completed") return null;
   if (issue.closed_at == null) return null;
+  const effective_date = utcDateOrNull(issue.closed_at);
+  if (effective_date == null) return null; // unparseable closed_at — skip, don't crash
   return {
     scope_id: scopeId,
     source: "github_issue",
     external_ref: `github:issue:${issue.number}`,
     ship_ts: issue.closed_at,
-    effective_date: utcDate(issue.closed_at),
+    effective_date,
     status: "completed",
     rationale_richtext: buildRationale(issue.title, issue.body, issue.html_url, issue.user?.login),
   };
