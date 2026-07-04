@@ -16,7 +16,8 @@ ingestion, deploy, and the AI summary layer — the conventional shell, not the 
 ✓ Schema   11 tables, RLS + RBAC memberships, tenant-isolation verified (0 leaks)
 ✓ Bridge   engine → evidence (append-only) → causal graph, live E2E verified
 ✓ CI       all gates re-run on every push (GitHub Actions + Supabase)
-☐ App/UI · GitHub ingest · deploy engine · Anthropic summary  ← next
+✓ App/UI   approved shell built (Next 16): 3 tabs + Core Metrics drawer, seed data, visual-QA'd vs mockups
+☐ GitHub ingest · deploy engine · Anthropic summary · wire UI to Supabase  ← next
 ```
 
 ## What's built (all on `main`, verified against live evidence)
@@ -69,15 +70,34 @@ first-partner ask (point it at a metric with ~3 months of daily history and a ch
 shipped 45+ days ago) and the demo (pick such a metric). It is the "credible inconclusive"
 the design was built around.
 
+## App/UI — as built (2026-07-03)
+
+The approved shell is built and running on `next dev` (Next 16 + Tailwind v4), visual-QA'd
+against the mockups on all three tabs. Currently renders **deterministic seed data**
+(`lib/seed.ts`, seeded PRNG so SSR===CSR) — the single seam to swap for RLS-scoped Supabase
+reads. Structure (as-built lives at repo root, NOT `/src`):
+- `app/(dashboard)/{impact,data-workshop,actions}/page.tsx` + shared `layout.tsx` (persistent
+  header + tab strip + Core Metrics drawer); `app/page.tsx` redirects `/` → `/impact`.
+- `components/shell` (GlobalHeader, TabStrip, CoreMetricsDrawer, Logo), `components/charts`
+  (pure SVG: LineTimeSeries with PR flags, ImpactBar diverging, Sparkline — zero chart deps),
+  `components/{impact,data-workshop,actions}`, `components/ui` (Delta = colorblind-safe
+  glyph+color+label, Panel, icons).
+- `lib/{types,seed,format,derive}.ts`. Brand tokens + single light theme in `app/globals.css`.
+- Real brand logo saved at `public/logo.svg` (stacked lockup); header uses a purpose-built
+  horizontal lockup (`components/shell/Logo.tsx`).
+- Note: `unstable_instant` (Next 16 route hint) was NOT used — it needs `cacheComponents`
+  enabled and throws in Client Components. Revisit if enabling Cache Components.
+
 ## Next (priority order)
 
-1. **App/UI** — Next.js scaffold + Supabase client + the approved shell (global header +
-   `Project: Orbit / Gummy Alpha` breadcrumb + 3 tabs: Data Workshop / Actions & Decisions /
-   Impact + persistent bottom Core Metrics drawer). Mockups: `~/.gstack/projects/adam-causent-causent-ai/designs/causent-shell-20260702/`. **Needs your visual QA + `/plan-design-review` → `/design-review`.**
+1. **Wire the UI to Supabase** — replace `lib/seed.ts` with RLS-scoped reads (metrics +
+   observations + actions + causal_edges/evidence via the bridge). Same component tree.
 2. **GitHub ingestion** — capped backfill (PRs/issues → actions), OAuth/PAT read.
 3. **Deploy the engine** as a Vercel Python function behind a shared-secret + input/action cap.
 4. **Anthropic summary layer** — templated-from-numbers summary + adversarial/regression eval.
 5. **Auth** — multi-provider (email + Google + GitHub + SSO) via Supabase (SEC2).
+6. **Design polish** — run `/plan-design-review` → `/design-review` on the built shell; the
+   ImpactBar axis ticks could use rounder anchored values, and the avatar/account menu is static.
 
 ## Open risks / TODO
 
