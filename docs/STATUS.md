@@ -1,23 +1,33 @@
 # Causent — Build Status & Resume Guide
 
-Last updated: 2026-07-03. Single source of truth for "where are we and how do I pick up."
+Last updated: 2026-07-04. Single source of truth for "where are we and how do I pick up."
 Product: **"Did-It-Ship, Did-It-Work"** — connect GitHub, tie each shipped action to a
 business metric, produce an honest causal readout on a scoped causal graph.
 
 ## TL;DR
 
-The **entire backend "did-it-work" loop is built, adversarially verified, and on `main`**
-(pushed to `github.com/adam-causent/causent-ai`). What remains is the app/UI, GitHub
-ingestion, deploy, and the AI summary layer — the conventional shell, not the hard part.
+The **full product loop is now closed end-to-end (locally, adversarially verified)** on
+branch **`overnight/wire-up`** (NOT yet pushed; `main` untouched). Seeded GitHub-PR → metric
+data flows through the **real** persistence bridge into `causal_edges` + append-only
+`evidence_objects`, and the Next.js dashboard renders those engine-derived readouts **directly
+from Supabase** (not seed), honoring the 45/45 confident-vs-gathering-data boundary. GitHub
+ingestion, the honest AI-summary layer, and a deployable engine function are all built +
+tested. **Everything that remains is credentialed, not code-blocked:** a live Anthropic key
+(summary eval vs the real model), a GitHub token/OAuth (live ingestion), Vercel creds (engine
+deploy). See `docs/OVERNIGHT_REPORT_2.md` for the phase-by-phase evidence.
 
 ```
 ✓ Plan     office-hours → CEO → Eng → Design reviews (all CLEARED)
-✓ Engine   honest causal inference, 1058 tests, data-scientist + causal-researcher signed off 8/10
+✓ Engine   honest causal inference, 1058 tests (1078 with engine-fn), signed off 8/10
 ✓ Schema   11 tables, RLS + RBAC memberships, tenant-isolation verified (0 leaks)
 ✓ Bridge   engine → evidence (append-only) → causal graph, live E2E verified
 ✓ CI       all gates re-run on every push (GitHub Actions + Supabase)
-✓ App/UI   approved shell built (Next 16): 3 tabs + Core Metrics drawer, seed data, visual-QA'd vs mockups
-☐ GitHub ingest · deploy engine · Anthropic summary · wire UI to Supabase  ← next
+✓ App/UI   approved shell (Next 16): 3 tabs + Core Metrics drawer, visual-QA'd vs mockups
+✓ Loop     seed → real bridge → Supabase → UI; /impact matches DB cell-for-cell (A1–A4, A-verify)
+✓ Ingest   fixture-tested capped/idempotent GitHub → actions + live adapters/CLI (C1, C-verify)
+✓ Summary  honest deterministic readout→prose + adversarial/regression eval (B1, B2, B-verify)
+✓ Engine-fn  deploy-ready Vercel Python fn (guards+caps), stateless, no creds (D1, D-verify)
+☐ LIVE     Anthropic key (summary) · GitHub token (ingest) · Vercel deploy  ← credentialed only
 ```
 
 ## What's built (all on `main`, verified against live evidence)
@@ -70,12 +80,35 @@ first-partner ask (point it at a metric with ~3 months of daily history and a ch
 shipped 45+ days ago) and the demo (pick such a metric). It is the "credible inconclusive"
 the design was built around.
 
-## App/UI — as built (2026-07-03)
+## Loop closed — as built (2026-07-04, branch `overnight/wire-up`)
 
-The approved shell is built and running on `next dev` (Next 16 + Tailwind v4), visual-QA'd
-against the mockups on all three tabs. Currently renders **deterministic seed data**
-(`lib/seed.ts`, seeded PRNG so SSR===CSR) — the single seam to swap for RLS-scoped Supabase
-reads. Structure (as-built lives at repo root, NOT `/src`):
+The dashboard now renders **from Supabase** (materialized `causal_edges` + authoritative ITS
+`evidence_objects`), not seed data. `lib/seed.ts` is retained only as a fallback behind
+`CAUSENT_USE_SEED=1` (or on any DB-read error, so the app never white-screens). Verified: a
+served `/impact` in DB mode matches an independent direct-SQL computation of the graph
+cell-for-cell (Actions 10, Confident 4/50, Net +$249K, Gathering 15, Win 50%, per-action
+lifts, all-dash sub-45-day May cohort), the 45/45 boundary is faithfully reflected, and the
+service-role key does NOT reach the client bundle. New wiring:
+- `engine/persistence/seed_demo.py` — idempotent tenant seed, materializes the graph through
+  the **real** bridge over an **RLS-scoped** connection (`SET ROLE authenticated`). 10 actions
+  (8 May PRs exercise gathering-data + 2 earlier landmark PRs make the confident path
+  reachable, since no May-2025 action can reach 45 post-ship points before END_DATE 2025-05-23).
+- `engine/persistence/run_demo.py` — bridge runner over the seeded project.
+- `lib/supabase-server.ts` (server-only client, browser-import guard) + `lib/data/*` async
+  getters + `lib/data/dashboard.ts` (`loadDashboardData()`, React-`cache` memoized, seed
+  fallback). Impact cells show a signed number **only** for a confident directional edge;
+  withheld/insufficient readouts collapse to "—" — no engine figure is ever fabricated.
+- `lib/ingest/*` — fixture-tested, capped, idempotent GitHub → `actions` ingestion (pure core
+  + live adapters + CLI, token-gated) with a `(scope_id, external_ref)` unique-index backstop.
+- `lib/summary/*` — deterministic honest readout→prose generator + adversarial/regression eval
+  harness (golden baseline) + invariant-clamped LLM polish seam (off by default).
+- `api/engine.py` + `vercel.json` + root `requirements.txt` — deploy-ready (NOT deployed)
+  Vercel Python function wrapping `batch_readout`, shared-secret + input caps, stateless.
+
+### Approved shell (2026-07-03, still current)
+
+The approved shell (Next 16 + Tailwind v4) was visual-QA'd against the mockups on all three
+tabs. Structure (as-built lives at repo root, NOT `/src`):
 - `app/(dashboard)/{impact,data-workshop,actions}/page.tsx` + shared `layout.tsx` (persistent
   header + tab strip + Core Metrics drawer); `app/page.tsx` redirects `/` → `/impact`.
 - `components/shell` (GlobalHeader, TabStrip, CoreMetricsDrawer, Logo), `components/charts`
@@ -90,14 +123,26 @@ reads. Structure (as-built lives at repo root, NOT `/src`):
 
 ## Next (priority order)
 
-1. **Wire the UI to Supabase** — replace `lib/seed.ts` with RLS-scoped reads (metrics +
-   observations + actions + causal_edges/evidence via the bridge). Same component tree.
-2. **GitHub ingestion** — capped backfill (PRs/issues → actions), OAuth/PAT read.
-3. **Deploy the engine** as a Vercel Python function behind a shared-secret + input/action cap.
-4. **Anthropic summary layer** — templated-from-numbers summary + adversarial/regression eval.
-5. **Auth** — multi-provider (email + Google + GitHub + SSO) via Supabase (SEC2).
-6. **Design polish** — run `/plan-design-review` → `/design-review` on the built shell; the
-   ImpactBar axis ticks could use rounder anchored values, and the avatar/account menu is static.
+The four items above (UI↔Supabase, ingestion, engine deploy, summary layer) are now **BUILT
+and verified locally** on `overnight/wire-up`. What remains:
+
+0. **Merge `overnight/wire-up` → `main`** — review the diff, then land + push. Nothing on the
+   branch is pushed yet; `main` is untouched.
+1. **Provide the three live credentials** (none are code-blocked — see `OVERNIGHT_REPORT_2.md`):
+   - `ANTHROPIC_API_KEY` → run `RUN_LIVE_POLISH=1 node --test lib/summary/__tests__/live-polish.test.ts`.
+   - GitHub token/OAuth → live ingestion via `lib/ingest/cli.ts` (per SEC3/T-TOK: per-connection
+     token in Vault, not `GITHUB_TOKEN` stand-in).
+   - Vercel creds → deploy `api/engine.py` per `api/DEPLOY.md` (+ set `CAUSENT_ENGINE_SECRET`).
+2. **Per-request freshness** — dashboard routes are statically prerendered (DB read at build
+   time). Add `export const dynamic = "force-dynamic"` (or revalidation) when live freshness is
+   needed. Swap the demo service-role server client for a per-request `@supabase/ssr` RLS client
+   (TODO in `lib/supabase-server.ts`) once real auth/session wiring lands.
+3. **Auth** — multi-provider (email + Google + GitHub + SSO) via Supabase (SEC2).
+4. **Design polish** — run `/plan-design-review` → `/design-review`; also fix the stale "Last 30
+   Days vs Prior 30 Days" subtitle on the Impact-by-Metric panel (bars are net confident causal
+   ITS lift across all history, not period-over-period). ImpactBar axis ticks, static account menu.
+5. **Install the `server-only` npm package** so an errant client import of `lib/supabase-server.ts`
+   fails at build time, not just at request time (defense-in-depth; no leak today).
 
 ## Open risks / TODO
 
