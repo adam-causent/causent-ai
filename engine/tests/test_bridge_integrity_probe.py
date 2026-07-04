@@ -125,9 +125,11 @@ def test_regression_fdr_demotion_is_auditable_not_silent():
                 (S, WS, dates[step_at]),
             )
             for a, idx in zip(INCON, incon_idx):
+                # Distinct external_refs per filler action: external_ref is unique per
+                # scope (actions_scope_external_ref_uniq, the GitHub-dedup backstop).
                 cur.execute(
-                    "insert into public.actions (action_id, scope_id, source, external_ref, effective_date) values (%s,%s,'manual','I',%s)",
-                    (a, WS, dates[idx]),
+                    "insert into public.actions (action_id, scope_id, source, external_ref, effective_date) values (%s,%s,'manual',%s,%s)",
+                    (a, WS, f"I{idx}", dates[idx]),
                 )
 
         _run_bridge_as_user(USER, WS, METRIC)
