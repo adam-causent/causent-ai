@@ -12,9 +12,10 @@ data flows through the **real** persistence bridge into `causal_edges` + append-
 `evidence_objects`, and the Next.js dashboard renders those engine-derived readouts **directly
 from Supabase** (not seed), honoring the 45/45 confident-vs-gathering-data boundary. GitHub
 ingestion, the honest AI-summary layer, and a deployable engine function are all built +
-tested. **Everything that remains is credentialed, not code-blocked:** a live Anthropic key
-(summary eval vs the real model), a GitHub token/OAuth (live ingestion), Vercel creds (engine
-deploy). See `docs/OVERNIGHT_REPORT_2.md` for the phase-by-phase evidence.
+tested. The **live summary guardrail is now proven against the real model** (19/19 vs
+`claude-opus-4-8`, 2026-07-04). **Everything else that remains is credentialed, not
+code-blocked:** a GitHub token/OAuth (live ingestion) and Vercel creds (engine deploy). See
+`docs/OVERNIGHT_REPORT_2.md` for the phase-by-phase evidence.
 
 ```
 ✓ Plan     office-hours → CEO → Eng → Design reviews (all CLEARED)
@@ -27,7 +28,8 @@ deploy). See `docs/OVERNIGHT_REPORT_2.md` for the phase-by-phase evidence.
 ✓ Ingest   fixture-tested capped/idempotent GitHub → actions + live adapters/CLI (C1, C-verify)
 ✓ Summary  honest deterministic readout→prose + adversarial/regression eval (B1, B2, B-verify)
 ✓ Engine-fn  deploy-ready Vercel Python fn (guards+caps), stateless, no creds (D1, D-verify)
-☐ LIVE     Anthropic key (summary) · GitHub token (ingest) · Vercel deploy  ← credentialed only
+✓ Live-eval Anthropic summary guardrail proven vs claude-opus-4-8 (19/19, 2026-07-04)
+☐ LIVE     GitHub token (ingest) · Vercel deploy  ← credentialed only
 ```
 
 ## What's built (all on `main`, verified against live evidence)
