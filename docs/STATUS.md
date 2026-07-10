@@ -1,6 +1,6 @@
 # Causent — Build Status & Resume Guide
 
-Last updated: 2026-07-09. Single source of truth for "where are we and how do I pick up."
+Last updated: 2026-07-10. Single source of truth for "where are we and how do I pick up."
 Product: **"Did-It-Ship, Did-It-Work"** — connect GitHub, tie each shipped action to a
 business metric, produce an honest causal readout on a scoped causal graph.
 
@@ -31,6 +31,8 @@ code-blocked:** a GitHub token/OAuth (live ingestion) and Vercel creds (engine d
 ✓ Live-eval Anthropic summary guardrail proven vs claude-opus-4-8 (19/19, 2026-07-04)
 ✓ Landed   PR #1 overnight/wire-up → main (2026-07-08); local main synced
 ✓ UI-v2    Reports tab + North Star objective + Aggregated-Impact restructure (2026-07-09)
+✓ UI-v3    FINAL brand logo + nav deep-links + objectives DB parity + mobile fixes +
+           ingest hardening (2026-07-10, branch overnight/ui-polish)
 ☐ LIVE     GitHub token (ingest) · Vercel deploy  ← credentialed only
 ```
 
@@ -134,6 +136,32 @@ through the same `lib/data` → component shapes (DB parity noted in `TODOS.md` 
 - **Deferred** (`TODOS.md` P2): wire inert chrome buttons + cross-links (e.g. Impact actions
   table → the action in the Actions tab); DB-path parity for objective + reports + the trimmed
   aggregated-impact getter.
+
+### Overnight UI + hardening pass (2026-07-10, branch `overnight/ui-polish`)
+
+All verified locally (248 lib tests + 1079 engine tests green, `next build` clean,
+live browser QA in both seed and DB modes):
+- **Brand logo (FINAL)** — `public/logo.svg` replaced with the FINAL stacked lockup
+  (palette `#4285f4`/`#00aaa7`/`#f1c232`); header lockup rebuilt from the real brand
+  pieces (`components/shell/Logo.tsx`: dot-grid mark + outlined wordmark); new SVG
+  favicon `app/icon.svg` (colored dot cluster on a white tile).
+- **Nav wiring** — Impact actions table deep-links to `/actions?selected=<id>`
+  (Suspense-wrapped `useSearchParams` seeding); drawer "Add / Layer Metric" →
+  `/data-workshop`; account chip → `AccountMenu` dropdown (honest disabled sign-out).
+- **Objectives DB parity** — migration `20260710000000_objectives.sql` (workspace-scoped
+  north-star doc, metrics-style RLS, explicit grants), `lib/data/objective.ts`,
+  seed_demo.py row, RLS-isolation test coverage; `getAggregatedImpact()` trimmed to the
+  one improvement-rate figure the redesigned strip reads.
+- **Design pass** — ImpactBar round-number axis ticks anchored at 0 (`formatCurrencyTick`);
+  2 HIGH mobile fixes (tab-strip/breadcrumb collision; drawer overlap at 375px). Audit
+  report: `~/.gstack/projects/adam-causent-causent-ai/designs/design-audit-20260710/`.
+- **Ingest hardening (P3)** — within-run external_ref dedup, loud CLI arg validation
+  (`lib/ingest/cli-args.ts`), 500-char per-line rationale cap, `server-only` build-time
+  guard on `lib/supabase-server.ts` (CLI now needs `--conditions react-server`; noted
+  in cli.ts).
+- **Deliberately untouched** — the summary layer's golden baseline (formatter change was
+  scoped to chart ticks to keep the live-proven guardrail output byte-identical) and the
+  seed Gross-Profit generator (would invalidate documented verification figures).
 
 ### Approved shell (2026-07-03, still current)
 
