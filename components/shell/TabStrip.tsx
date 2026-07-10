@@ -17,8 +17,9 @@ export function TabStrip({ scope }: { scope: Scope }) {
 
   return (
     <div className="relative flex h-12 items-center border-b border-[var(--border)] bg-[var(--surface)] px-5">
-      {/* project breadcrumb — namespaces every metric/action/edge to a scope */}
-      <div className="flex items-center gap-2 text-[13px]">
+      {/* project breadcrumb — namespaces every metric/action/edge to a scope.
+          Hidden below lg: the centered tab nav would collide with it. */}
+      <div className="hidden items-center gap-2 text-[13px] lg:flex">
         <FolderIcon className="text-[var(--text-subtle)]" />
         <span className="text-[var(--text-muted)]">Project:</span>
         <span className="font-medium text-[var(--brand-blue)]">{scope.project}</span>
@@ -26,15 +27,16 @@ export function TabStrip({ scope }: { scope: Scope }) {
         <span className="font-semibold text-[var(--text)]">{scope.workspace}</span>
       </div>
 
-      {/* tabs — persistent across the whole flow */}
-      <nav className="absolute left-1/2 flex h-full -translate-x-1/2 items-center gap-7">
+      {/* tabs — persistent across the whole flow. Statically laid out (scrollable)
+          on small screens; absolutely centered only once the breadcrumb fits. */}
+      <nav className="scroll-slim flex h-full items-center gap-5 overflow-x-auto lg:absolute lg:left-1/2 lg:-translate-x-1/2 lg:gap-7 lg:overflow-x-visible">
         {TABS.map((tab) => {
           const active = pathname === tab.href;
           return (
             <Link
               key={tab.href}
               href={tab.href}
-              className={`relative flex h-full items-center text-[14px] transition-colors ${
+              className={`relative flex h-full items-center whitespace-nowrap text-[14px] transition-colors ${
                 active
                   ? "font-semibold text-[var(--text)]"
                   : "font-medium text-[var(--text-muted)] hover:text-[var(--text)]"
