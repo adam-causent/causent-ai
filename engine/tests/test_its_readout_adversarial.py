@@ -218,6 +218,19 @@ def test_exact_null_step_is_inconclusive_at_zero_noise():
     assert r.direction == "INCONCLUSIVE"  # ci_low>0 False, ci_high<0 False
 
 
+def test_direction_tol_deadzones_collapse_dust_not_real_steps():
+    # Platform-independent regression guard for the fix to the two dust-sensitive
+    # tests above. A zero-residual fit collapses the CI to a ~1e-14 point; the
+    # direction boundary must dead-zone that dust (INCONCLUSIVE) yet never swallow a
+    # genuine step. This pins the tolerance constant so it can't erode either way.
+    from causal.its_readout import direction_tol
+
+    tol = direction_tol(np.array([3.0, 20.0, 42.6]))  # data scale ~42.6
+    assert 1e-13 < tol < 1e-3  # above the ~1e-14 collapse dust, far below any real effect
+    # A clean noise-free +5 step still classifies POSITIVE (dead-zone preserves real effects).
+    assert its_readout(_make(50, 50, [3.0, 0.4, 5.0, 0.0], sigma=0.0)).direction == "POSITIVE"
+
+
 def test_hac_curbs_false_positives_under_autocorrelation():
     # Under an autocorrelated null, HAC must fire spuriously less than the naive
     # iid readout — the concrete blocker the covariance change exists to fix.
