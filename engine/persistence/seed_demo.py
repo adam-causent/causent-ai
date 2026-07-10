@@ -259,6 +259,25 @@ def _seed(conn: psycopg.Connection, series: dict[uuid.UUID, list[float]]) -> Non
             (USER, ORG),
         )
 
+        # North-star objective (mirrors lib/seed.ts projectObjective so DB mode
+        # and seed mode render the same document).
+        cur.execute(
+            "insert into public.objectives (scope_id, title, statement, key_results, updated_at) "
+            "values (%s,'North Star',%s,%s,%s)",
+            (
+                SCOPE,
+                "Reach $3M ARR by lifting activation and defending against churn — "
+                "without eroding gross margin. Every action below is a bet toward that "
+                "goal, and Causent reads out which bets actually moved it.",
+                json.dumps([
+                    "Activation Rate: 33% → 45%",
+                    "Net ARR: +$500K from shipped experiments",
+                    "Churn Rate: held under 2.5%",
+                ]),
+                "2025-05-12",
+            ),
+        )
+
         for metric_id, name, source, unit in METRICS:
             cur.execute(
                 "insert into public.metrics (metric_id, scope_id, name, source, granularity, unit) "

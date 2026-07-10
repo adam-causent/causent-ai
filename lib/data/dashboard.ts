@@ -22,6 +22,7 @@ import { getScope } from "@/lib/data/scope";
 import { getMetrics } from "@/lib/data/metrics";
 import { getActions } from "@/lib/data/actions";
 import { getImpactByMetric, getAggregatedImpact } from "@/lib/data/impact";
+import { getObjective } from "@/lib/data/objective";
 import * as seed from "@/lib/seed";
 
 /** The 30-day-ish reporting window shown in the drawer/impact headers. */
@@ -35,7 +36,7 @@ export type DashboardData = {
   aggregatedImpact: ImpactStat[];
   impactByMetric: MetricImpact[];
   impactWindow: ImpactWindow;
-  /** The project north-star document (null until a DB-backed objective exists). */
+  /** The project north-star document (null when the workspace has none yet). */
   objective: ProjectObjective | null;
   /** Saved stakeholder reports (empty until a DB-backed reports table exists). */
   reports: Report[];
@@ -86,13 +87,14 @@ export const loadDashboardData = cache(async function loadDashboardData(): Promi
   if (seedForced()) return seedData();
 
   try {
-    const [scope, metrics, actions, aggregatedImpact, impactByMetric] =
+    const [scope, metrics, actions, aggregatedImpact, impactByMetric, objective] =
       await Promise.all([
         getScope(),
         getMetrics(),
         getActions(),
         getAggregatedImpact(),
         getImpactByMetric(),
+        getObjective(),
       ]);
     return {
       scope,
@@ -101,10 +103,9 @@ export const loadDashboardData = cache(async function loadDashboardData(): Promi
       aggregatedImpact,
       impactByMetric,
       impactWindow: deriveImpactWindow(metrics),
-      // TODO: source the objective + reports from project-level `objectives` /
-      // `reports` rows once the schema carries them; until then the DB path has
-      // no north-star document and no saved reports.
-      objective: null,
+      objective,
+      // TODO: source reports from a project-level `reports` table once the
+      // schema carries one; until then the DB path has no saved reports.
       reports: [],
       source: "db",
     };

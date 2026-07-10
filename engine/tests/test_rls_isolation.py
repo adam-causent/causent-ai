@@ -58,6 +58,8 @@ EDGE_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000c5")
 EDGE_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000d5")
 EVIDENCE_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000c6")
 EVIDENCE_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000d6")
+OBJECTIVE_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000c7")
+OBJECTIVE_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000d7")
 
 ALL_USERS = (USER_A, USER_B, USER_A_VIEWER)
 
@@ -71,6 +73,7 @@ DOMAIN_TABLES = [
     ("public.nodes", "scope_id", WS_A, WS_B),
     ("public.causal_edges", "scope_id", WS_A, WS_B),
     ("public.evidence_objects", "scope_id", WS_A, WS_B),
+    ("public.objectives", "scope_id", WS_A, WS_B),
 ]
 
 # Hierarchy / spine tables also carry tenant identity and must isolate too.
@@ -178,6 +181,11 @@ def _seed(conn: psycopg.Connection) -> None:
             "insert into public.evidence_objects (evidence_id, scope_id, edge_id, methodology) values "
             "(%s,%s,%s,'ITS'),(%s,%s,%s,'ITS')",
             (EVIDENCE_A, WS_A, EDGE_A, EVIDENCE_B, WS_B, EDGE_B),
+        )
+        cur.execute(
+            "insert into public.objectives (objective_id, scope_id, statement) values "
+            "(%s,%s,'o'),(%s,%s,'o')",
+            (OBJECTIVE_A, WS_A, OBJECTIVE_B, WS_B),
         )
 
 
