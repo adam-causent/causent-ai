@@ -1,14 +1,14 @@
 # Causent — Build Status & Resume Guide
 
-Last updated: 2026-07-04. Single source of truth for "where are we and how do I pick up."
+Last updated: 2026-07-09. Single source of truth for "where are we and how do I pick up."
 Product: **"Did-It-Ship, Did-It-Work"** — connect GitHub, tie each shipped action to a
 business metric, produce an honest causal readout on a scoped causal graph.
 
 ## TL;DR
 
-The **full product loop is now closed end-to-end (locally, adversarially verified)** on
-branch **`overnight/wire-up`** (NOT yet pushed; `main` untouched). Seeded GitHub-PR → metric
-data flows through the **real** persistence bridge into `causal_edges` + append-only
+The **full product loop is now closed end-to-end (locally, adversarially verified)** and is
+**merged to `main`** (PR #1 `overnight/wire-up` → `main`, landed 2026-07-08). Seeded GitHub-PR
+→ metric data flows through the **real** persistence bridge into `causal_edges` + append-only
 `evidence_objects`, and the Next.js dashboard renders those engine-derived readouts **directly
 from Supabase** (not seed), honoring the 45/45 confident-vs-gathering-data boundary. GitHub
 ingestion, the honest AI-summary layer, and a deployable engine function are all built +
@@ -29,6 +29,8 @@ code-blocked:** a GitHub token/OAuth (live ingestion) and Vercel creds (engine d
 ✓ Summary  honest deterministic readout→prose + adversarial/regression eval (B1, B2, B-verify)
 ✓ Engine-fn  deploy-ready Vercel Python fn (guards+caps), stateless, no creds (D1, D-verify)
 ✓ Live-eval Anthropic summary guardrail proven vs claude-opus-4-8 (19/19, 2026-07-04)
+✓ Landed   PR #1 overnight/wire-up → main (2026-07-08); local main synced
+✓ UI-v2    Reports tab + North Star objective + Aggregated-Impact restructure (2026-07-09)
 ☐ LIVE     GitHub token (ingest) · Vercel deploy  ← credentialed only
 ```
 
@@ -107,6 +109,32 @@ service-role key does NOT reach the client bundle. New wiring:
 - `api/engine.py` + `vercel.json` + root `requirements.txt` — deploy-ready (NOT deployed)
   Vercel Python function wrapping `batch_readout`, shared-secret + input caps, stateless.
 
+### UI iteration (2026-07-09, from live review)
+
+First dogfooding pass over the running app. All changes are seed-mode-visible and thread
+through the same `lib/data` → component shapes (DB parity noted in `TODOS.md` P2):
+- **Reports tab** (`app/(dashboard)/reports/`, `components/reports/*`) — a new fourth tab. A
+  whole-project stakeholder report that rolls up objective + decisions + key metrics + impact
+  analysis into one document (and is the summarization that feeds the decision graph). Saved
+  reports list + `depth: "full" | "succinct"` (succinct = top movers only). Reuses the honest
+  ITS figures + 45-day caveat so a report never overclaims. "Create Report" moved off the
+  global header into this tab's "New Report" button.
+- **North Star objective** (`components/actions/ObjectivePanel.tsx`) — a purpose document
+  pinned above the Actions & Decisions list so the action log reads as bets against a stated
+  goal. New `ProjectObjective` type + `seed.projectObjective`; `DashboardData.objective`
+  (seed-only, DB path returns null pending an `objectives` row).
+- **Aggregated-Impact restructure** (`components/impact/AggregatedImpact.tsx`) — dropped the
+  Neutral/Negative tiles; the strip now leads with Metrics-Tracked + Improvement-Rate, then
+  the top-4 metrics by magnitude of confident causal lift (from `impactByMetric`).
+- **Honesty labels** — the Impact-by-Metric and Aggregated-Impact subtitles no longer claim a
+  fabricated "Last 30 Days vs Prior 30 Days"; they say "net confident causal lift (ITS)".
+- **Dev-mode flag** — `CAUSENT_USE_SEED=1` in `.env.local` pins the app to the deterministic
+  seed dataset for visual iteration (skips the ~7s ECONNREFUSED hang when local Supabase/Docker
+  is down). Comment it out to read from a running local Supabase.
+- **Deferred** (`TODOS.md` P2): wire inert chrome buttons + cross-links (e.g. Impact actions
+  table → the action in the Actions tab); DB-path parity for objective + reports + the trimmed
+  aggregated-impact getter.
+
 ### Approved shell (2026-07-03, still current)
 
 The approved shell (Next 16 + Tailwind v4) was visual-QA'd against the mockups on all three
@@ -128,8 +156,7 @@ tabs. Structure (as-built lives at repo root, NOT `/src`):
 The four items above (UI↔Supabase, ingestion, engine deploy, summary layer) are now **BUILT
 and verified locally** on `overnight/wire-up`. What remains:
 
-0. **Merge `overnight/wire-up` → `main`** — review the diff, then land + push. Nothing on the
-   branch is pushed yet; `main` is untouched.
+0. ~~Merge `overnight/wire-up` → `main`~~ — **DONE** (PR #1, 2026-07-08). `main` is the loop.
 1. **Provide the three live credentials** (none are code-blocked — see `OVERNIGHT_REPORT_2.md`):
    - `ANTHROPIC_API_KEY` → run `RUN_LIVE_POLISH=1 node --test lib/summary/__tests__/live-polish.test.ts`.
    - GitHub token/OAuth → live ingestion via `lib/ingest/cli.ts` (per SEC3/T-TOK: per-connection
@@ -148,8 +175,14 @@ and verified locally** on `overnight/wire-up`. What remains:
 
 ## Open risks / TODO
 
-- CI's first cloud run not yet confirmed green (local venv is Python 3.14, CI pins 3.12 —
-  likely fine; watch the first Actions run).
+- ~~CI's first cloud run not yet confirmed green~~ — **RESOLVED 2026-07-09 (PR #3).** The first
+  cloud run was red, but not for the Python-version reason guessed here. Two causes, both fixed:
+  (a) the schema relied on Supabase's *implicit* default privileges — `setup-cli@latest` in CI
+  doesn't grant them to user-migration tables, so every RLS/bridge test hit `permission denied`;
+  fixed by an explicit-GRANT migration (`20260709000000_grant_base_privileges.sql`). (b) two
+  engine adversarial tests flipped on ~1e-14 float dust from zero-residual fits (nondeterministic
+  across BLAS/numpy builds); fixed with a scale-relative dead-zone in the direction/placebo
+  classifiers. CI now green (engine + RLS + bridge, 3m28s).
 - `owner` role enforced server-side (no DB policy depends on it); hierarchy creation is
   service_role-only — see `supabase/SCHEMA_REPORT.md` residual risk.
 - `nodes.semantic_ref` is polymorphic (no FK) — app-enforced integrity.

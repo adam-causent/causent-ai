@@ -14,6 +14,8 @@ import type {
   ImpactStat,
   Metric,
   MetricImpact,
+  ProjectObjective,
+  Report,
   Scope,
 } from "@/lib/types";
 import { getScope } from "@/lib/data/scope";
@@ -33,6 +35,10 @@ export type DashboardData = {
   aggregatedImpact: ImpactStat[];
   impactByMetric: MetricImpact[];
   impactWindow: ImpactWindow;
+  /** The project north-star document (null until a DB-backed objective exists). */
+  objective: ProjectObjective | null;
+  /** Saved stakeholder reports (empty until a DB-backed reports table exists). */
+  reports: Report[];
   /** Which source actually served this payload (for diagnostics/telemetry). */
   source: "db" | "seed";
 };
@@ -58,6 +64,8 @@ function seedData(): DashboardData {
     aggregatedImpact: seed.aggregatedImpact,
     impactByMetric: seed.impactByMetric,
     impactWindow: { start: seed.impactWindow.start, end: seed.impactWindow.end },
+    objective: seed.projectObjective,
+    reports: seed.reports,
     source: "seed",
   };
 }
@@ -93,6 +101,11 @@ export const loadDashboardData = cache(async function loadDashboardData(): Promi
       aggregatedImpact,
       impactByMetric,
       impactWindow: deriveImpactWindow(metrics),
+      // TODO: source the objective + reports from project-level `objectives` /
+      // `reports` rows once the schema carries them; until then the DB path has
+      // no north-star document and no saved reports.
+      objective: null,
+      reports: [],
       source: "db",
     };
   } catch (err) {

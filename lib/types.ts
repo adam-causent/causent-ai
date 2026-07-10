@@ -73,6 +73,38 @@ export type Action = {
   };
 };
 
+/**
+ * The project's north-star document: the single purpose every shipped action
+ * rolls up to. Rendered above the action list so the "why" frames the "what".
+ */
+export type ProjectObjective = {
+  /** Short eyebrow label, e.g. "North Star". */
+  title: string;
+  /** The purpose statement — one or two sentences. */
+  statement: string;
+  /** Measurable results that define success. */
+  keyResults: string[];
+  /** ISO yyyy-mm-dd of last edit. */
+  updatedAt: string;
+};
+
+/**
+ * A saved stakeholder report: a whole-project rollup of the objective, decisions,
+ * key metrics, and impact analysis. Doubles as the summarization that feeds the
+ * decision graph. `depth` controls how much the rendered report shows.
+ */
+export type Report = {
+  id: string;
+  title: string;
+  /** ISO yyyy-mm-dd the report was generated. */
+  createdAt: string;
+  author: string;
+  /** "full" = every action + full analysis; "succinct" = objective + top movers. */
+  depth: "full" | "succinct";
+  /** One-line description shown in the report list. */
+  summary: string;
+};
+
 /** One card in the Aggregated Impact strip. */
 export type ImpactStat = {
   label: string;

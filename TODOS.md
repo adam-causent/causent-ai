@@ -33,11 +33,29 @@ Full evidence per item in `docs/OVERNIGHT_REPORT_2.md`. None are code-blocked.
   `@supabase/ssr` RLS client (TODO documented in-file) once real auth/session wiring lands.
 - **Effort:** M (human) → M (CC). **Priority:** P2. **Depends on:** SEC2 auth.
 
-### P2 — Fix stale honesty-label subtitle
-- **What:** `app/(dashboard)/impact/page.tsx:20` — "Last 30 Days vs Prior 30 Days" on the
-  Impact-by-Metric panel is wrong; those bars are net confident causal ITS lift across all
-  history, not period-over-period. Contradicts the honest data layer.
-- **Effort:** S (human) → S (CC). **Priority:** P2.
+### ~~P2 — Fix stale honesty-label subtitle~~ ✅ DONE 2026-07-09
+- Impact-by-Metric subtitle now reads "Net confident causal lift (ITS, all history)"; the
+  Aggregated-Impact subtitle was corrected the same way. Both `page.tsx:20` and
+  `AggregatedImpact.tsx` no longer claim a fabricated period-over-period comparison.
+
+### P2 — Wire up in-app navigation (buttons + cross-links)
+- **What:** Most chrome buttons are inert placeholders. Tie them to destinations. Highest-value
+  link first: the **Actions table on `/impact`** should deep-link each row to that action in
+  **`/actions`** (select it in the list + editor). Also: header "Create Report" / "New Project" /
+  "Settings" / account menu, and the drawer/tab affordances.
+- **Where:** `components/impact/ActionsTable.tsx` → `next/link` to `/actions?selected=<id>`;
+  have `ActionsPageClient` read `?selected` (via `useSearchParams`) to seed `selectedId`.
+- **Effort:** S–M (human) → S (CC). **Priority:** P2.
+
+### P2 — DB-path parity for the 2026-07-09 UI changes
+- **Objective document:** `DashboardData.objective` is seed-only; the DB path returns `null`
+  (no schema row yet). Add a project-level `objectives` row + `lib/data` getter so the North
+  Star renders from Supabase, not just seed. (`lib/data/dashboard.ts` has the TODO.)
+- **Aggregated-Impact strip:** the new strip (metric count + improvement rate + top-4 metric
+  impacts) is driven by `impactByMetric` + `metrics` + the improvement-rate stat, so the DB
+  path already feeds it — but `getAggregatedImpact()` still computes the old 6-tile set; trim
+  it to just the improvement-rate figure it now needs (`lib/data/impact.ts`).
+- **Effort:** S (human) → S (CC). **Priority:** P2. **Depends on:** SEC2 auth / live DB.
 
 ### P3 — Ingestion + summary hardening (fail-safe today)
 - **Ingest (LOW, from C-verify):** dedup capped rows by `external_ref` before insert (a

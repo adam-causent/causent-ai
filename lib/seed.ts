@@ -5,6 +5,8 @@ import type {
   Metric,
   MetricImpact,
   Observation,
+  ProjectObjective,
+  Report,
   Scope,
 } from "@/lib/types";
 
@@ -84,6 +86,20 @@ export const scope: Scope = {
   org: "Causent",
   project: "Orbit",
   workspace: "Gummy Alpha",
+};
+
+// --- Project objective (the "why" every action rolls up to) ------------------
+
+export const projectObjective: ProjectObjective = {
+  title: "North Star",
+  statement:
+    "Reach $3M ARR by lifting activation and defending against churn — without eroding gross margin. Every action below is a bet toward that goal, and Causent reads out which bets actually moved it.",
+  keyResults: [
+    "Activation Rate: 33% → 45%",
+    "Net ARR: +$500K from shipped experiments",
+    "Churn Rate: held under 2.5%",
+  ],
+  updatedAt: "2025-05-12",
 };
 
 // --- Metric series colors (brand-safe, distinguishable) ---------------------
@@ -328,13 +344,14 @@ export function metricById(id: string): Metric | undefined {
 
 // --- Impact tab aggregates (canonical figures from the approved mockup) ------
 
+// The Aggregated-Impact strip now leads with framing numbers (metric count +
+// improvement rate) and then decomposes total impact into its top contributing
+// metrics (see components/impact/AggregatedImpact). Only the improvement-rate
+// figure is read from here; the metric tiles come from `impactByMetric`.
 export const aggregatedImpact: ImpactStat[] = [
+  { label: "Improvement Rate", value: "72%", comparison: "vs 55% prior", change: "+17pp", tone: "positive" },
   { label: "Total Actions Shipped", value: "18", comparison: "vs 11", change: "+64%", tone: "positive" },
-  { label: "Business Impact", value: "+$312K", comparison: "vs +$87K", tone: "positive" },
-  { label: "Win Rate", value: "72%", comparison: "vs 55%", tone: "positive" },
   { label: "Metrics Improved", value: "4 / 5", comparison: "vs 3 / 5", tone: "positive" },
-  { label: "Negative Impact", value: "-$28K", comparison: "vs -$61K", tone: "negative" },
-  { label: "Neutral Impact", value: "$0", comparison: "vs $0", tone: "neutral" },
 ];
 
 export const impactByMetric: MetricImpact[] = [
@@ -347,3 +364,26 @@ export const impactByMetric: MetricImpact[] = [
 
 /** Window for the Impact tab: last 30 days vs prior 30 days. */
 export const impactWindow = { start: "2025-04-24", end: "2025-05-23" } as const;
+
+// --- Saved stakeholder reports ----------------------------------------------
+
+export const reports: Report[] = [
+  {
+    id: "r-2205",
+    title: "Q2 Stakeholder Update",
+    createdAt: "2025-05-22",
+    author: "Adam K.",
+    depth: "full",
+    summary:
+      "Full-quarter rollup: objective progress, every shipped decision, and the confident causal impact behind Orbit's ARR movement.",
+  },
+  {
+    id: "r-2105",
+    title: "May Ship Review",
+    createdAt: "2025-05-15",
+    author: "Adam K.",
+    depth: "succinct",
+    summary:
+      "Succinct readout of May's ships — top movers and the metrics still gathering data toward a confident claim.",
+  },
+];
