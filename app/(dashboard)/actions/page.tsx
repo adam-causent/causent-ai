@@ -5,6 +5,8 @@ import { ActionsPageClient } from "@/components/actions/ActionsPageClient";
 // hands them to the client child, which owns the click-to-select interactivity.
 
 export default async function ActionsPage() {
-  const { actions, metrics } = await loadDashboardData();
-  return <ActionsPageClient actions={actions} metrics={metrics} />;
+  const { actions, metrics, objective } = await loadDashboardData();
+  return (
+    <ActionsPageClient actions={actions} metrics={metrics} objective={objective} />
+  );
 }

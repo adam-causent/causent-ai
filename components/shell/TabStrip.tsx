@@ -9,6 +9,7 @@ const TABS = [
   { href: "/data-workshop", label: "Data Workshop" },
   { href: "/actions", label: "Actions & Decisions" },
   { href: "/impact", label: "Impact" },
+  { href: "/reports", label: "Reports" },
 ] as const;
 
 export function TabStrip({ scope }: { scope: Scope }) {
