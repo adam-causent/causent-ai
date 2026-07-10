@@ -57,8 +57,8 @@ export function CoreMetricsDrawer({
 
   return (
     <section className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)]">
-      {/* drawer header */}
-      <div className="flex h-11 items-center justify-between px-5">
+      {/* drawer header (wraps on narrow viewports so the controls never overlap) */}
+      <div className="flex min-h-11 flex-wrap items-center justify-between gap-y-1 px-5 py-1">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -127,8 +127,8 @@ export function CoreMetricsDrawer({
             })}
           </div>
 
-          {/* summary panel */}
-          <div className="w-[320px] shrink-0 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-4">
+          {/* summary panel — hidden below lg (would overlap the hero charts) */}
+          <div className="hidden w-[320px] shrink-0 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-4 lg:block">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-[13px] font-semibold text-[var(--text)]">
                 Core Metrics Summary
