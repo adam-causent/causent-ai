@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="654 121 116 116">
+  <!-- Favicon: 2x3 crop of the Causent dot-grid mark (public/logo.svg), colored cluster. -->
+  <rect x="654" y="121" width="116" height="116" rx="24" fill="#ffffff"/>
+  <ellipse cx="669.91" cy="139.74" rx="14.33" ry="13.32" fill="#eeeeee"/>
+  <ellipse cx="669.91" cy="178.15" rx="14.33" ry="13.32" fill="#f1c232"/>
+  <ellipse cx="669.91" cy="216.57" rx="14.33" ry="13.32" fill="#00aaa7"/>
+  <ellipse cx="753.15" cy="139.74" rx="14.33" ry="13.32" fill="#f1c232"/>
+  <ellipse cx="753.15" cy="178.15" rx="14.33" ry="13.32" fill="#eeeeee"/>
+  <ellipse cx="753.15" cy="216.55" rx="14.33" ry="13.32" fill="#00aaa7"/>
+</svg>
