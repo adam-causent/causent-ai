@@ -1,4 +1,5 @@
 import { Logo } from "@/components/shell/Logo";
+import { AccountMenu } from "@/components/shell/AccountMenu";
 import { GearIcon, PlusIcon } from "@/components/ui/icons";
 
 // Top global header row — sits above the tab strip. Static chrome for v1.
@@ -25,9 +26,7 @@ export function GlobalHeader() {
           <PlusIcon />
         </button>
 
-        <div className="ml-1 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--brand-grey)] text-[12px] font-semibold text-white">
-          AK
-        </div>
+        <AccountMenu />
       </div>
     </header>
   );

@@ -5,9 +5,23 @@ import { formatCurrencyDelta } from "@/lib/format";
 // right (teal) and negative to the left (red). Direction is reinforced by the
 // signed value label at each bar tip, so it never reads by color alone.
 
+/**
+ * Round-number axis ticks anchored at 0: the raw step is snapped up to a
+ * 1/2/5×10ⁿ "nice" value, then ticks are laid at every multiple of it inside
+ * [min, max] — so labels read +$50K/+$100K instead of +$37.3K, and one tick
+ * always aligns with the zero baseline.
+ */
 function niceTicks(min: number, max: number, count = 7): number[] {
-  const step = (max - min) / (count - 1);
-  return Array.from({ length: count }, (_, i) => min + i * step);
+  const span = max - min;
+  if (span <= 0) return [0];
+  const rawStep = span / (count - 1);
+  const mag = 10 ** Math.floor(Math.log10(rawStep));
+  const step = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= rawStep) ?? rawStep;
+  const ticks: number[] = [];
+  for (let t = Math.ceil(min / step) * step; t <= max + step * 1e-9; t += step) {
+    ticks.push(Math.abs(t) < step * 1e-9 ? 0 : t);
+  }
+  return ticks;
 }
 
 export function ImpactBar({
