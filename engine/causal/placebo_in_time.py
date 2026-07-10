@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from math import isfinite
 
-from causal.its_readout import its_readout
+from causal.its_readout import direction_tol, its_readout
 from causal.segmented_ols import segmented_ols
 from causal.step_ci import step_ci
 from causal.types import MIN_SIDE, PLACEBO_ALPHA, ITSResult, PlaceboResult, Series
@@ -63,7 +63,11 @@ def placebo_in_time(series: Series, real: ITSResult | None = None) -> PlaceboRes
         return _NOT_EVALUABLE
 
     placebo_lift = float(fit.coeffs[2])
-    ci_excludes_zero = ci_low > 0.0 or ci_high < 0.0
+    # Dead-zone against the float dust of a zero-residual placebo fit (a perfectly
+    # linear pre-window collapses the CI to a point at ~1e-14; a hard `> 0.0` test
+    # would fire nondeterministically on the dust's sign). Scale to the pre-window.
+    tol = direction_tol(series.values[:split])
+    ci_excludes_zero = ci_low > tol or ci_high < -tol
     if real is None:                    # compute the real readout once when not supplied
         real = its_readout(series)
     real_significant = real.status == "OK" and real.direction != "INCONCLUSIVE"

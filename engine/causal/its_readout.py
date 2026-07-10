@@ -22,10 +22,28 @@ from __future__ import annotations
 
 from math import isfinite, sqrt
 
+import numpy as np
+
 from causal.segmented_ols import segmented_ols
 from causal.step_ci import step_ci
 from causal.t_ppf import t_two_sided_p
 from causal.types import FLOOR_CONFIDENT, MIN_SIDE, ITSResult, Series
+
+
+def direction_tol(values: np.ndarray) -> float:
+    """Scale-relative dead-zone separating a genuine step from the float dust of a
+    zero-residual (perfect) fit.
+
+    step_ci collapses a zero-variance fit to the point estimate (step, step). On
+    synthetic noise-free data `step` is then float dust (~1e-14), and a hard
+    `> 0.0` boundary reads that dust as a confident direction — nondeterministically,
+    since the dust's sign varies across BLAS/numpy builds (green locally, flipped in
+    CI). ~1e-9 of the data magnitude sits ~5 orders above the collapse dust and many
+    orders below any real effect, so real steps (even clean noise-free ones) still
+    classify while dust reads INCONCLUSIVE on every platform.
+    """
+    scale = float(np.max(np.abs(values))) if values.size else 0.0
+    return 1e-9 * (1.0 + scale)
 
 
 def its_readout(series: Series) -> ITSResult:
@@ -51,9 +69,10 @@ def its_readout(series: Series) -> ITSResult:
 
     lift = float(fit.coeffs[2])
     ci_low, ci_high = step_ci(fit)
-    if ci_low > 0.0:
+    tol = direction_tol(series.values)
+    if ci_low > tol:
         direction = "POSITIVE"
-    elif ci_high < 0.0:
+    elif ci_high < -tol:
         direction = "NEGATIVE"
     else:
         direction = "INCONCLUSIVE"
@@ -62,8 +81,8 @@ def its_readout(series: Series) -> ITSResult:
     se = sqrt(float(fit.cov[2, 2]))
     if se > 0.0:
         p_value = t_two_sided_p(lift / se, float(df))
-    else:  # perfect (zero-variance) fit: any non-zero step is certain
-        p_value = 1.0 if lift == 0.0 else 0.0
+    else:  # perfect (zero-variance) fit: a step beyond float dust is certain
+        p_value = 0.0 if abs(lift) > tol else 1.0
 
     dw = fit.durbin_watson if isfinite(fit.durbin_watson) else None
     return ITSResult("ITS", "OK", lift, ci_low, ci_high, direction,

@@ -53,7 +53,13 @@ def _oracle_readout(dates, values, split, alpha=0.05):
     cov = hac_cov(X, resid)
     half = stats.t.ppf(1.0 - alpha / 2.0, dof) * math.sqrt(cov[2, 2])
     step = beta[2]
-    return step, (step - half) > 0.0 or (step + half) < 0.0
+    # Same scale-relative dead-zone the engine uses (its_readout.direction_tol),
+    # inlined to keep the oracle an independent scipy re-derivation. A zero-residual
+    # fit collapses the CI to a point at ~1e-14 dust; without the dead-zone the
+    # `> 0.0` boundary flips on the dust's sign and engine/oracle disagree per platform.
+    scale = float(np.max(np.abs(values))) if values.size else 0.0
+    tol = 1e-9 * (1.0 + scale)
+    return step, (step - half) > tol or (step + half) < -tol
 
 
 def _oracle_placebo(dates, values, split):
