@@ -371,3 +371,24 @@ Any change to the graph model goes in `decision-graph.md` first; this section is
 - **VERDICT:** CEO + ENG + DESIGN CLEARED — ready to implement. **T0 (bare numpy OLS + t-PPF proof) is the gating first task**; 4 engine decisions are contingent on it.
 
 NO UNRESOLVED DECISIONS
+
+---
+
+## PIVOT (2026-07-11): prospective on-ramp added — see `prospective-prediction-loop.md`
+
+This PRD's retrospective wedge (measure what already shipped) is **RETAINED** as the
+data-rich on-ramp, but it returns zero on an empty graph — nothing pulls in the first
+decision. The approved pivot (`/plan-ceo-review` + `/plan-eng-review`, 2026-07-11) ADDS a
+**prospective prediction→drift→resolution** on-ramp so the graph accretes from either end
+(dual cold-start). The moat thesis is unchanged (the accreting graph); this fills the "why
+would anyone give you the first edge?" blank.
+
+Deltas that touch THIS doc:
+- **Competitive reality:** add the new defensibility argument — a fast-follower
+  (Eppo/Statsig + a GitHub webhook) can bolt on retrospective readout but CANNOT
+  retro-manufacture accumulated pre-registered predictions; the moat now begins accruing
+  day one instead of after 45 days.
+- **Build Strategy D1 "No webhooks (poll/backfill)" is REVERSED** — the drift signal needs
+  push (webhooks) for timeliness + poll (Vercel Cron) for completeness. See the eng design.
+- Full product framing, data model, resolution stats, drift design, phasing, and success
+  metrics live in `prospective-prediction-loop.md`.

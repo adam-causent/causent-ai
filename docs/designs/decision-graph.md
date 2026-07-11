@@ -246,3 +246,25 @@ there is enough captured evidence to train it. This is where most future work li
   workspace), `BEFORE_AFTER_14D` methodology, authoritative-method belief key, raw-stats
   columns on evidence, clustering-as-overlay, and the intelligence roadmap. Sourced from
   the PRD + CEO/Eng/Design review decisions.
+
+## v2 — prospective intent + prediction layer (2026-07-11)
+
+`prospective-prediction-loop.md` adds an **intent layer UPSTREAM** of this causal graph.
+It does not change the ITS belief model or the ACTION/CLUSTER→METRIC edge model below —
+new objects sit above them:
+- **`decisions`** (intent) + **`decision_actions(is_lever)`** — a decision parents many
+  actions; `is_lever` marks the ticket carrying the mechanism. NOT a `nodes`/`causal_edges`
+  participant (the causal layer stays clean).
+- **`predictions`** (human pre-registered; distinct from engine-measured
+  `evidence_objects`) + `prediction_revisions` (append-only). Resolves against the ITS
+  `causal_edge` for the lever action→metric at `resolution_date`.
+- **`transition_events`** (append-only work-item transitions) — drives drift + sets the
+  intervention date.
+- **Resolution verdict machine** maps every belief-table state (this doc's "Belief &
+  direction rules") to a verdict (`CONFIRMED` / `DIRECTION_CONFIRMED` / `REFUTED` /
+  `INCONCLUSIVE` / `GATHERING` / `UNRESOLVABLE` / `VOIDED` / `UNATTRIBUTED`). Scoring is
+  sign-primary + magnitude-in-CI bonus, %-of-mean units.
+- **Priors/memory:** store the full resolution tuple; include REFUTED + INCONCLUSIVE
+  (no survivorship bias); weight by `belief_score`; compute on-the-fly in v1. This is a
+  concrete near-term instance of the deferred P4 "second-order simulation" roadmap row —
+  but the HUMAN authors the prediction, not the model.
