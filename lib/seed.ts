@@ -1,5 +1,6 @@
 import type {
   Action,
+  Decision,
   ImpactCell,
   ImpactStat,
   Metric,
@@ -130,6 +131,23 @@ const NONE = (metricId: string): ImpactCell =>
 
 export const actions: Action[] = [
   {
+    // Never shipped: the VOIDED lever (see decisions d-6). The bridge skips
+    // unshipped actions; this row exists so the intent layer can point at it.
+    id: "a-8440",
+    pr: 8440,
+    title: "Usage-Based Pricing",
+    shippedAt: null,
+    primaryMetricId: "arr",
+    impact: [NONE("arr"), NONE("grossProfit"), NONE("activation"), NONE("churn"), NONE("support")],
+    rationale: {
+      hypothesis: "Usage-based pricing converts high-usage free teams into revenue.",
+      expectedMetricId: "arr",
+      body: [
+        "Scoped but never shipped — the lever behind the usage-based pricing prediction was descoped before merge, so its prediction resolved VOIDED.",
+      ],
+    },
+  },
+  {
     id: "a-8421",
     pr: 8421,
     title: "Pricing Experiment v2",
@@ -250,12 +268,74 @@ export const actions: Action[] = [
       cell("support", "down", "-0.9K", true, -900),
     ],
   },
+  {
+    // INCONCLUSIVE probe: shipped mid-series on the organic churn series with
+    // >= 45 days each side — the honest engine reads no confident effect.
+    id: "a-8290",
+    pr: 8290,
+    title: "Churn Save Offers",
+    shippedAt: "2025-04-01",
+    primaryMetricId: "churn",
+    impact: [NONE("arr"), NONE("grossProfit"), NONE("activation"), NONE("churn"), NONE("support")],
+    rationale: {
+      hypothesis: "A save-offer flow at cancellation intent reduces churn.",
+      expectedMetricId: "churn",
+      body: [
+        "Offers a discounted annual switch at the moment of cancellation intent. The ITS readout on churn stayed inconclusive — no confident signal, unproven rather than wrong.",
+      ],
+    },
+  },
+  {
+    // Confident landmark #2 (belief 1.0): +5.5pp step on Activation at ship.
+    id: "a-8256",
+    pr: 8256,
+    title: "Signup Funnel Rebuild",
+    shippedAt: "2025-03-05",
+    primaryMetricId: "activation",
+    impact: [
+      NONE("arr"),
+      NONE("grossProfit"),
+      cell("activation", "up", "+5.5pp", true, 5.5),
+      NONE("churn"),
+      NONE("support"),
+    ],
+    rationale: {
+      hypothesis: "A shorter signup funnel raises the share of new users who activate.",
+      expectedMetricId: "activation",
+      body: [
+        "Rebuilt the signup funnel from five steps to two. Shipped with 45+ days of daily history on each side, so the ITS could make a confident causal claim.",
+      ],
+    },
+  },
+  {
+    // Confident landmark #1 (belief 1.0): +$260K step on ARR at ship.
+    id: "a-8107",
+    pr: 8107,
+    title: "Billing Retry Logic",
+    shippedAt: "2025-02-03",
+    primaryMetricId: "arr",
+    impact: [
+      cell("arr", "up", "+$260K", true, 260_000),
+      NONE("grossProfit"),
+      NONE("activation"),
+      NONE("churn"),
+      NONE("support"),
+    ],
+    rationale: {
+      hypothesis: "Automatic dunning retries recover involuntary churn and lift ARR.",
+      expectedMetricId: "arr",
+      body: [
+        "Automatic retry of failed card payments with smart backoff. Shipped early enough that both the 45-day pre and post windows are fully observed — the confident-path landmark.",
+      ],
+    },
+  },
 ];
 
 /** Step-change bumps applied to a metric's series at each action's ship date. */
 function stepsFor(metricId: string): Step[] {
   const steps: Step[] = [];
   for (const a of actions) {
+    if (a.shippedAt === null) continue; // unshipped: no step, no flag
     const c = a.impact.find((x) => x.metricId === metricId);
     if (!c || c.value === null || c.direction === "neutral") continue;
     steps.push({ date: a.shippedAt, delta: c.value });
@@ -385,5 +465,184 @@ export const reports: Report[] = [
     depth: "succinct",
     summary:
       "Succinct readout of May's ships — top movers and the metrics still gathering data toward a confident claim.",
+  },
+];
+
+// --- Decisions + pre-registered predictions (the prospective on-ramp) --------
+// Mirrors engine/persistence/seed_demo.py so seed mode and DB mode tell the
+// SAME story. Verdicts below are the ones the real verdict machine produced
+// over this dataset (resolved as of END_DATE) — every target state appears:
+// CONFIRMED / REFUTED / DIRECTION_CONFIRMED (+ a logged revision) /
+// INCONCLUSIVE / GATHERING (auto-extended) / VOIDED.
+export const decisions: Decision[] = [
+  {
+    id: "d-1",
+    title: "Recover involuntary churn revenue",
+    createdAt: "2025-01-27",
+    rationale: {
+      body: [
+        "Failed card payments are our largest involuntary-churn bucket. Automatic dunning retries should recover most of them and lift ARR.",
+      ],
+      mechanismCategory: "monetization",
+    },
+    actionIds: ["a-8107"],
+    leverActionId: "a-8107",
+    predictions: [
+      {
+        id: "p-1",
+        metricId: "arr",
+        direction: "POSITIVE",
+        magnitudePctMean: 13.5,
+        resolutionDate: "2025-05-15",
+        committedAt: "2025-01-27",
+        verdict: "CONFIRMED",
+        resolvedAt: "2025-05-23",
+        measuredPct: 13.5,
+        revisions: [],
+      },
+    ],
+  },
+  {
+    id: "d-2",
+    title: "Billing retries refund risk",
+    createdAt: "2025-01-27",
+    rationale: {
+      body: [
+        "Counter-position on the retry rollout: aggressive retries could trigger refunds and chargebacks that net ARR DOWN in the first quarter.",
+      ],
+      mechanismCategory: "monetization",
+    },
+    actionIds: ["a-8107"],
+    leverActionId: "a-8107",
+    predictions: [
+      {
+        id: "p-2",
+        metricId: "arr",
+        direction: "NEGATIVE",
+        magnitudePctMean: 3.0,
+        resolutionDate: "2025-05-15",
+        committedAt: "2025-01-27",
+        verdict: "REFUTED",
+        resolvedAt: "2025-05-23",
+        measuredPct: 13.5, // moved the other way — the strongest learning
+        revisions: [],
+      },
+    ],
+  },
+  {
+    id: "d-3",
+    title: "Rebuild the signup funnel",
+    createdAt: "2025-02-24",
+    rationale: {
+      body: [
+        "Five signup steps to two. We expect a large activation lift — the size of the number was debated in the room and revised once before commit.",
+      ],
+      mechanismCategory: "activation",
+    },
+    actionIds: ["a-8256"],
+    leverActionId: "a-8256",
+    predictions: [
+      {
+        id: "p-3",
+        metricId: "activation",
+        direction: "POSITIVE",
+        magnitudePctMean: 32.6,
+        resolutionDate: "2025-05-15",
+        committedAt: "2025-02-24",
+        verdict: "DIRECTION_CONFIRMED", // right way, off on size (~2x over)
+        resolvedAt: "2025-05-23",
+        measuredPct: 16.3,
+        revisions: [
+          {
+            oldMagnitudePct: 48.9,
+            newMagnitudePct: 32.6,
+            reason:
+              "Pilot cohort data suggested the original estimate was too aggressive.",
+            revisedAt: "2025-03-01",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "d-4",
+    title: "Save offers at cancellation",
+    createdAt: "2025-03-24",
+    rationale: {
+      body: [
+        "A discounted annual switch at the moment of cancellation intent should reduce churn.",
+      ],
+      mechanismCategory: "retention",
+    },
+    actionIds: ["a-8290"],
+    leverActionId: "a-8290",
+    predictions: [
+      {
+        id: "p-4",
+        metricId: "churn",
+        direction: "NEGATIVE",
+        magnitudePctMean: 5.0,
+        resolutionDate: "2025-05-20",
+        committedAt: "2025-03-24",
+        verdict: "INCONCLUSIVE", // no confident signal — unproven, not wrong
+        resolvedAt: "2025-05-23",
+        measuredPct: null,
+        revisions: [],
+      },
+    ],
+  },
+  {
+    id: "d-5",
+    title: "Guide new users in-app",
+    createdAt: "2025-04-30",
+    rationale: {
+      body: [
+        "Contextual guidance nudges new users to their first success; we expect activation to rise within weeks of rollout.",
+      ],
+      mechanismCategory: "activation",
+    },
+    actionIds: ["a-8324"],
+    leverActionId: "a-8324",
+    predictions: [
+      {
+        id: "p-5",
+        metricId: "activation",
+        direction: "POSITIVE",
+        magnitudePctMean: 4.0,
+        resolutionDate: "2025-06-06", // GATHERING auto-extended from 2025-05-20
+        committedAt: "2025-04-30",
+        verdict: "GATHERING",
+        resolvedAt: null, // a not-yet is not a no
+        measuredPct: null,
+        revisions: [],
+      },
+    ],
+  },
+  {
+    id: "d-6",
+    title: "Move to usage-based pricing",
+    createdAt: "2025-04-15",
+    rationale: {
+      body: [
+        "Usage-based pricing converts high-usage free teams into revenue. The lever ticket was descoped before merge.",
+      ],
+      mechanismCategory: "monetization",
+    },
+    actionIds: ["a-8440"],
+    leverActionId: "a-8440",
+    predictions: [
+      {
+        id: "p-6",
+        metricId: "arr",
+        direction: "POSITIVE",
+        magnitudePctMean: 6.0,
+        resolutionDate: "2025-05-20",
+        committedAt: "2025-04-15",
+        verdict: "VOIDED", // the lever never shipped
+        resolvedAt: "2025-05-23",
+        measuredPct: null,
+        revisions: [],
+      },
+    ],
   },
 ];

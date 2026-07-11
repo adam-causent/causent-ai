@@ -76,6 +76,7 @@ import psycopg
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from persistence.bridge import persist_metric_readouts  # noqa: E402
+from persistence.resolve import resolve_due_predictions  # noqa: E402
 
 DSN = os.environ.get(
     "DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
@@ -219,7 +220,36 @@ ACTIONS = [
      "A revamped onboarding flow shortens time-to-value."),
     (8421, "Pricing Experiment v2", date(2025, 5, 23), M_ARR,
      "Simplifying the pricing page increases paid conversion."),
+    # INCONCLUSIVE probe (epic #6 child #11): ships mid-series on the ORGANIC churn
+    # series (no injected step), >= 45 pts each side, and > 14 days from both
+    # landmarks AND the May cohort so it never chains into a cluster with them.
+    # The honest engine reads no confident effect -> its prediction resolves
+    # INCONCLUSIVE ("no confident signal — unproven, not wrong").
+    (8290, "Churn Save Offers", date(2025, 4, 1), M_CHURN,
+     "A save-offer flow at cancellation intent reduces churn."),
 ]
+
+# A never-shipped action (effective_date NULL): the bridge skips it (it only loads
+# actions with a non-null effective_date), and the prediction mapped to it resolves
+# VOIDED ("the lever never shipped").
+UNSHIPPED_ACTION = (8440, "Usage-Based Pricing",
+                    "Usage-based pricing converts high-usage free teams into revenue.")
+
+
+# --- Prospective layer (epic #6 child #11): decisions + predictions -------------------
+# One graph, two on-ramps: these pre-registered predictions resolve against the SAME
+# ITS engine the retrospective path uses. Every target verdict state is exercised:
+#   CONFIRMED / REFUTED (ARR class — 2 resolved tuples so priors have a base rate),
+#   DIRECTION_CONFIRMED (+ a logged revision), INCONCLUSIVE, GATHERING, VOIDED.
+def _decision_uuid(n: int) -> uuid.UUID:
+    return uuid.UUID(f"ca5e0000-0000-0000-0000-0000000d{n:04d}")
+
+
+def _prediction_uuid(n: int) -> uuid.UUID:
+    return uuid.UUID(f"ca5e0000-0000-0000-0000-0000000e{n:04d}")
+
+
+RESOLVE_TODAY = END_DATE  # the demo's "today": resolution runs as of the series end
 
 
 def _rationale(hypothesis: str, expected_metric: str) -> dict:
@@ -301,6 +331,78 @@ def _seed(conn: psycopg.Connection, series: dict[uuid.UUID, list[float]]) -> Non
                  json.dumps({"title": title, **_rationale(hypothesis, primary_name)})),
             )
 
+        # Never-shipped action: NULL ship_ts/effective_date, status 'open'.
+        upr, utitle, uhyp = UNSHIPPED_ACTION
+        cur.execute(
+            "insert into public.actions "
+            "(action_id, scope_id, source, external_ref, ship_ts, effective_date, "
+            " status, rationale_richtext) "
+            "values (%s,%s,'github_pr',%s,null,null,'open',%s)",
+            (_action_uuid(upr), SCOPE, f"PR #{upr}",
+             json.dumps({"title": utitle, **_rationale(uhyp, "ARR")})),
+        )
+
+
+def _seed_prospective(conn: psycopg.Connection,
+                      series: dict[uuid.UUID, list[float]]) -> None:
+    """Decisions + lever mappings + pre-registered predictions (as superuser,
+    like the base seed). Resolution then runs AS THE USER via resolve.py.
+
+    Elicit-not-assert: these magnitudes are the seeded HUMANS' committed numbers.
+    The two derived from the series (D1 exactly, D3 deliberately ~2x off) are
+    computed here only so the demo's verdicts are deterministic."""
+    # The scoring denominator resolve.py will derive: the ITS pre-window mean.
+    arr_pre_mean = float(np.mean(series[M_ARR][: _idx(ARR_STEP_DATE)]))
+    act_pre_mean = float(np.mean(series[M_ACTIVATION][: _idx(ACTIVATION_STEP_DATE)]))
+    arr_true_pct = 260_000.0 / arr_pre_mean * 100.0          # ~13.5% -> CONFIRMED
+    act_over_pct = round(5.5 / act_pre_mean * 100.0 * 2, 1)  # ~2x actual -> DIRECTION_CONFIRMED
+
+    #      n  title                              lever    metric        dir        pct            resolution_date
+    decisions = [
+        (1, "Recover involuntary churn revenue", 8107, M_ARR,        "POSITIVE", round(arr_true_pct, 2), date(2025, 5, 15)),
+        (2, "Billing retries refund risk",       8107, M_ARR,        "NEGATIVE", 3.0,                    date(2025, 5, 15)),
+        (3, "Rebuild the signup funnel",         8256, M_ACTIVATION, "POSITIVE", act_over_pct,           date(2025, 5, 15)),
+        (4, "Save offers at cancellation",       8290, M_CHURN,      "NEGATIVE", 5.0,                    date(2025, 5, 20)),
+        (5, "Guide new users in-app",            8324, M_ACTIVATION, "POSITIVE", 4.0,                    date(2025, 5, 20)),
+        (6, "Move to usage-based pricing",       8440, M_ARR,        "POSITIVE", 6.0,                    date(2025, 5, 20)),
+    ]
+    with conn.cursor() as cur:
+        for n, title, lever_pr, metric_id, direction, pct, due in decisions:
+            rationale = {
+                "type": "doc",
+                "content": [{"type": "paragraph", "content": [
+                    {"type": "text", "text": f"We predict: {title}."}]}],
+                "meta": {"mechanism_category": "monetization"
+                         if metric_id == M_ARR else "activation"
+                         if metric_id == M_ACTIVATION else "retention"},
+            }
+            cur.execute(
+                "insert into public.decisions (decision_id, scope_id, title, rationale, created_by) "
+                "values (%s,%s,%s,%s,%s)",
+                (_decision_uuid(n), SCOPE, title, json.dumps(rationale), USER),
+            )
+            cur.execute(
+                "insert into public.decision_actions (decision_id, action_id, is_lever) "
+                "values (%s,%s,true)",
+                (_decision_uuid(n), _action_uuid(lever_pr)),
+            )
+            cur.execute(
+                "insert into public.predictions (prediction_id, scope_id, decision_id, "
+                "metric_id, direction, magnitude_pct_mean, resolution_date, committed_by) "
+                "values (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (_prediction_uuid(n), SCOPE, _decision_uuid(n), metric_id,
+                 direction, pct, due, USER),
+            )
+        # D3 was revised down once — a revision is data, not a failure.
+        cur.execute(
+            "insert into public.prediction_revisions (prediction_id, old_magnitude, "
+            "old_direction, new_magnitude, new_direction, reason, revised_by) "
+            "values (%s,%s,'POSITIVE',%s,'POSITIVE',%s,%s)",
+            (_prediction_uuid(3), act_over_pct * 1.5, act_over_pct,
+             "Pilot cohort data suggested the original estimate was too aggressive.",
+             USER),
+        )
+
 
 # --- Bridge materialization AS THE DEMO USER (RLS-scoped, never the service role) -----
 def _materialize_as_user(scope_id: uuid.UUID, metric_id: uuid.UUID) -> None:
@@ -341,12 +443,32 @@ def _verify(conn: psycopg.Connection) -> dict:
             "select count(*) from public.evidence_objects where scope_id=%s", (SCOPE,)),
     }
 
+    counts["decisions"] = scalar(
+        "select count(*) from public.decisions where scope_id=%s", (SCOPE,))
+    counts["predictions"] = scalar(
+        "select count(*) from public.predictions where scope_id=%s", (SCOPE,))
+    counts["prediction_revisions"] = scalar(
+        "select count(*) from public.prediction_revisions pr "
+        "join public.predictions p on p.prediction_id=pr.prediction_id "
+        "where p.scope_id=%s", (SCOPE,))
+
     confident = scalar(
         "select count(*) from public.causal_edges "
         "where scope_id=%s and belief_score=1.0 and direction='POSITIVE'", (SCOPE,))
     insufficient = scalar(
         "select count(*) from public.causal_edges "
         "where scope_id=%s and belief_reason='INSUFFICIENT_HISTORY'", (SCOPE,))
+
+    # Prospective layer: verdict per seeded prediction (the demo must exercise
+    # CONFIRMED / REFUTED / DIRECTION_CONFIRMED / INCONCLUSIVE / GATHERING / VOIDED).
+    cur.execute(
+        "select d.title, m.name, p.direction, p.magnitude_pct_mean, "
+        "p.resolved_verdict, p.resolution_date "
+        "from public.predictions p "
+        "join public.decisions d on d.decision_id=p.decision_id "
+        "join public.metrics m on m.metric_id=p.metric_id "
+        "where p.scope_id=%s order by p.prediction_id", (SCOPE,))
+    predictions = cur.fetchall()
 
     # Named breakdown of the ACTION->METRIC edges for a human-readable readout.
     cur.execute(
@@ -361,7 +483,8 @@ def _verify(conn: psycopg.Connection) -> dict:
     edges = cur.fetchall()
 
     return {"counts": counts, "confident_edges": confident,
-            "insufficient_edges": insufficient, "edges": edges}
+            "insufficient_edges": insufficient, "edges": edges,
+            "predictions": predictions}
 
 
 def main() -> int:
@@ -371,11 +494,25 @@ def main() -> int:
         _teardown(conn)                 # idempotent: wipe any prior demo tenant
         series = _build_series()
         _seed(conn, series)             # base data as superuser (bypassrls)
+        _seed_prospective(conn, series)  # decisions + pre-registered predictions
     finally:
         conn.close()
 
     for metric_id, name, *_ in METRICS:  # materialize the graph AS THE USER, per metric
         _materialize_as_user(SCOPE, metric_id)
+
+    # Resolve the due predictions AS THE USER through the real verdict machine
+    # (RLS-scoped, same contract as production / the "Resolve now" affordance).
+    conn = psycopg.connect(DSN)
+    conn.autocommit = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("set role authenticated")
+            claims = json.dumps({"sub": str(USER), "role": "authenticated"})
+            cur.execute("select set_config('request.jwt.claims', %s, false)", (claims,))
+        resolve_due_predictions(conn, SCOPE, today=RESOLVE_TODAY)
+    finally:
+        conn.close()
 
     conn = psycopg.connect(DSN)
     conn.autocommit = True
@@ -397,15 +534,28 @@ def main() -> int:
         bstr = "—" if belief is None else f"{belief:.2f}"
         print(f"  {ref:9s} {metric:16s} {direction:13s} {bstr:7s} {reason or ''}")
 
+    print("\n=== Pre-registered predictions (resolved via the verdict machine) ===")
+    print(f"  {'decision':38s} {'metric':16s} {'dir':9s} {'pct':7s} verdict")
+    for title, metric, direction, pct, verdict, due in result["predictions"]:
+        print(f"  {title:38s} {metric:16s} {direction:9s} {pct:7.2f} "
+              f"{verdict or '(unresolved)'}  (due {due})")
+
+    verdicts = {v for *_, v, _ in result["predictions"] if v}
+    target = {"CONFIRMED", "REFUTED", "DIRECTION_CONFIRMED",
+              "INCONCLUSIVE", "GATHERING", "VOIDED"}
+
     ok = (
         c["metrics"] == 5
         and c["metric_observations"] == 5 * SERIES_DAYS
-        and c["actions"] == len(ACTIONS)
+        and c["actions"] == len(ACTIONS) + 1  # + the never-shipped VOIDED lever
         and result["confident_edges"] >= 1
         and result["insufficient_edges"] >= 1
+        and target <= verdicts
     )
-    print("\nRESULT:", "PASS — both confident and gathering-data paths present"
-          if ok else "FAIL — required demo invariants not met")
+    print("\nRESULT:", "PASS — confident, gathering-data, and all 6 target "
+          "prediction verdicts present"
+          if ok else f"FAIL — required demo invariants not met "
+          f"(verdicts seen: {sorted(verdicts)})")
     return 0 if ok else 1
 
 

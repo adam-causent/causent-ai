@@ -54,7 +54,7 @@ export function ActionsTable({
                   </div>
                 </td>
                 <td className="px-2 py-2.5 whitespace-nowrap text-[var(--text-muted)]">
-                  {formatShortDate(a.shippedAt)}
+                  {a.shippedAt ? formatShortDate(a.shippedAt) : "—"}
                 </td>
                 {COLUMNS.map((id) => {
                   const c = byMetric.get(id);

@@ -59,8 +59,8 @@ export type Action = {
   /** GitHub PR number, e.g. 8421. */
   pr: number;
   title: string;
-  /** ISO yyyy-mm-dd ship date. */
-  shippedAt: string;
+  /** ISO yyyy-mm-dd ship date. null = not yet shipped (an open lever — see VOIDED). */
+  shippedAt: string | null;
   /** The metric this action primarily targeted. */
   primaryMetricId: string;
   /** Per-metric authoritative impact cells (ITS row). */
@@ -71,6 +71,71 @@ export type Action = {
     expectedMetricId: string;
     body: string[];
   };
+};
+
+export type PredictionDirection = "POSITIVE" | "NEGATIVE";
+
+/** The 8-state resolution verdict machine (docs/designs/prospective-prediction-loop.md). */
+export type PredictionVerdict =
+  | "CONFIRMED"
+  | "DIRECTION_CONFIRMED"
+  | "REFUTED"
+  | "INCONCLUSIVE"
+  | "GATHERING"
+  | "UNRESOLVABLE"
+  | "VOIDED"
+  | "UNATTRIBUTED";
+
+/** One logged change to a committed prediction — a revision is data, not a failure. */
+export type PredictionRevision = {
+  oldMagnitudePct: number;
+  newMagnitudePct: number;
+  reason: string;
+  /** ISO yyyy-mm-dd. */
+  revisedAt: string;
+};
+
+/**
+ * A human pre-registered prediction (elicit-not-assert: the TEAM commits this
+ * number; the engine only measures it at resolutionDate). Mirrors the
+ * `predictions` table.
+ */
+export type Prediction = {
+  id: string;
+  metricId: string;
+  direction: PredictionDirection;
+  /** The committed magnitude, %-of-metric-mean — authoritative for display. */
+  magnitudePctMean: number;
+  /** ISO yyyy-mm-dd. GATHERING auto-extends this date. */
+  resolutionDate: string;
+  /** ISO yyyy-mm-dd. */
+  committedAt: string;
+  /** null = not yet resolved. */
+  verdict: PredictionVerdict | null;
+  /** ISO yyyy-mm-dd; null until a terminal verdict. */
+  resolvedAt: string | null;
+  /** Measured %-of-mean from the resolution tuple (display only; null = none). */
+  measuredPct: number | null;
+  revisions: PredictionRevision[];
+};
+
+/**
+ * The intent layer: a decision groups the actions that implement it and owns
+ * the predictions committed against it. Mirrors the `decisions` +
+ * `decision_actions` tables. NOT a causal-graph participant.
+ */
+export type Decision = {
+  id: string;
+  title: string;
+  /** ISO yyyy-mm-dd. */
+  createdAt: string;
+  /** Why — plain paragraphs for v1 (mirrors decisions.rationale). */
+  rationale: { body: string[]; mechanismCategory?: string };
+  /** Actions grouped under this decision (ids into the actions list). */
+  actionIds: string[];
+  /** v1 invariant: ONE lever per (decision, metric); null = unmapped (UNATTRIBUTED risk). */
+  leverActionId: string | null;
+  predictions: Prediction[];
 };
 
 /**

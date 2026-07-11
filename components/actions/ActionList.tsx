@@ -50,7 +50,9 @@ export function ActionList({
                 <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
                   <span className="tabular-nums">#{a.pr}</span>
                   <CheckIcon size={12} className="text-[var(--pos)]" />
-                  <span>Shipped {formatLongDate(a.shippedAt)}</span>
+                  <span>
+                    {a.shippedAt ? `Shipped ${formatLongDate(a.shippedAt)}` : "Not shipped"}
+                  </span>
                 </div>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">

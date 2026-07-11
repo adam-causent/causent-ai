@@ -90,7 +90,7 @@ export async function getActions(): Promise<Action[]> {
       id: `a-${pr}`,
       pr,
       title: doc?.title ?? row.external_ref ?? `PR #${pr}`,
-      shippedAt: row.effective_date ?? (row.ship_ts ? row.ship_ts.slice(0, 10) : ""),
+      shippedAt: row.effective_date ?? (row.ship_ts ? row.ship_ts.slice(0, 10) : null),
       primaryMetricId,
       impact,
     };

@@ -53,10 +53,13 @@ export async function verifyDataLayer(): Promise<string[]> {
 
   // --- Actions + honest impact cells --------------------------------------
   const actions = await getActions();
-  assert(actions.length === 10, `10 actions (got ${actions.length})`);
+  // 12 = the 10 retrospective PRs + the INCONCLUSIVE churn probe (#8290) + the
+  // never-shipped VOIDED lever (#8440) added by the prospective layer (#11).
+  assert(actions.length === 12, `12 actions (got ${actions.length})`);
+  const shippedActions = actions.filter((a) => a.shippedAt !== null);
   assert(
-    actions.every((a, i, s) => i === 0 || a.shippedAt <= s[i - 1].shippedAt),
-    "actions ordered newest ship date first",
+    shippedActions.every((a, i, s) => i === 0 || a.shippedAt! <= s[i - 1].shippedAt!),
+    "shipped actions ordered newest ship date first",
   );
   assert(
     actions.every((a) => a.impact.length === 5),
@@ -113,14 +116,16 @@ export async function verifyDataLayer(): Promise<string[]> {
   ok("impact-by-metric reflects only confident causal claims");
 
   // --- Aggregated impact ---------------------------------------------------
+  // getAggregatedImpact() was trimmed (UI-v3) to the single improvement-rate
+  // figure the redesigned strip reads; the old Actions-Shipped/Gathering-Data
+  // labels no longer exist.
   const agg = await getAggregatedImpact();
-  const shipped = agg.find((s) => s.label === "Actions Shipped")!;
-  assert(shipped.value === "10", `Actions Shipped == 10 (got ${shipped.value})`);
-  const gathering = agg.find((s) => s.label === "Gathering Data")!;
-  assert(Number(gathering.value) > 0, "Gathering Data count is > 0 (May cohort)");
-  const confident = agg.find((s) => s.label === "Confident Readouts")!;
-  assert(Number(confident.value) >= 2, "at least 2 confident readouts");
-  ok("aggregated impact cards computed from the graph");
+  const improvement = agg.find((s) => s.label === "Improvement Rate")!;
+  assert(
+    improvement !== undefined && /%$/.test(improvement.value),
+    "Improvement Rate present, formatted as a percentage",
+  );
+  ok("aggregated impact computed from the graph");
 
   return checks;
 }

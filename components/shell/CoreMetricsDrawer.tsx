@@ -51,9 +51,9 @@ export function CoreMetricsDrawer({
 
   const flagsForMetric = (color: string): SeriesFlag[] =>
     thin(
-      actions.filter((a) => a.shippedAt >= windowStart),
+      actions.filter((a) => a.shippedAt !== null && a.shippedAt >= windowStart),
       MAX_FLAGS,
-    ).map((a) => ({ date: a.shippedAt, label: `#${a.pr}`, color }));
+    ).map((a) => ({ date: a.shippedAt!, label: `#${a.pr}`, color }));
 
   return (
     <section className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)]">
