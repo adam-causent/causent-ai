@@ -21,9 +21,11 @@ Full evidence per item in `docs/OVERNIGHT_REPORT_2.md`. None are code-blocked.
   `GITHUB_TOKEN` stand-in in `lib/ingest/github-transport.ts` with a per-connection token
   encrypted in Vault, decoupled from login, 401/403 → reconnect on non-rate-limit auth failure.
   Run under a trusted job identity via `lib/ingest/cli.ts` (needs `tsx`/Next runtime for `@/*`).
-- **Vercel creds** → deploy `api/engine.py` per `api/DEPLOY.md`; set `CAUSENT_ENGINE_SECRET`
-  (`openssl rand -hex 32`) on preview+prod AND make the same value available to the Next.js
-  caller for the `x-causent-engine-secret` header (fn fails closed 401 until set).
+- ~~**Vercel creds** → deploy `api/engine.py`~~ ✅ DONE 2026-07-11: LIVE at
+  `https://causent-engine.vercel.app/api/engine` as standalone project `causent-engine`
+  (`scripts/deploy-engine.sh --prod`); `CAUSENT_ENGINE_SECRET` on prod+preview+`.env.local`;
+  smoke-tested (405 / fail-closed 401 / 200 with honest AUTOCORRELATION cap). See
+  `api/DEPLOY.md` for the split-project rationale + preview SSO-wall gotcha.
 - **Effort:** M (human, mostly ops) → S (CC). **Priority:** P1.
 
 ### P2 — Per-request freshness + RLS-scoped server client

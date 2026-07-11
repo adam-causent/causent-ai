@@ -33,7 +33,9 @@ code-blocked:** a GitHub token/OAuth (live ingestion) and Vercel creds (engine d
 ✓ UI-v2    Reports tab + North Star objective + Aggregated-Impact restructure (2026-07-09)
 ✓ UI-v3    FINAL brand logo + nav deep-links + objectives DB parity + mobile fixes +
            ingest hardening (2026-07-10, branch overnight/ui-polish)
-☐ LIVE     GitHub token (ingest) · Vercel deploy  ← credentialed only
+✓ ENGINE   LIVE at https://causent-engine.vercel.app/api/engine (2026-07-11, standalone
+           Vercel project via scripts/deploy-engine.sh; secret set; smoke-tested 405/401/200)
+☐ LIVE     GitHub token (ingest)  ← the one remaining credential
 ```
 
 ## What's built (all on `main`, verified against live evidence)
@@ -185,11 +187,18 @@ The four items above (UI↔Supabase, ingestion, engine deploy, summary layer) ar
 and verified locally** on `overnight/wire-up`. What remains:
 
 0. ~~Merge `overnight/wire-up` → `main`~~ — **DONE** (PR #1, 2026-07-08). `main` is the loop.
-1. **Provide the three live credentials** (none are code-blocked — see `OVERNIGHT_REPORT_2.md`):
-   - `ANTHROPIC_API_KEY` → run `RUN_LIVE_POLISH=1 node --test lib/summary/__tests__/live-polish.test.ts`.
-   - GitHub token/OAuth → live ingestion via `lib/ingest/cli.ts` (per SEC3/T-TOK: per-connection
-     token in Vault, not `GITHUB_TOKEN` stand-in).
-   - Vercel creds → deploy `api/engine.py` per `api/DEPLOY.md` (+ set `CAUSENT_ENGINE_SECRET`).
+1. **Live credentials** — two of three now closed:
+   - ~~`ANTHROPIC_API_KEY`~~ — in `.env.local`; live guardrail already proven 19/19 (2026-07-04).
+   - ~~Vercel creds~~ — **engine DEPLOYED to production 2026-07-11**:
+     `https://causent-engine.vercel.app/api/engine`, standalone project `causent-engine`
+     (see `api/DEPLOY.md` for why it's split from the app project + the SSO-wall gotcha);
+     `CAUSENT_ENGINE_SECRET` set on prod+preview+`.env.local`; smoke-tested 405/401/200
+     with the AUTOCORRELATION guard firing correctly on synthetic data. Redeploy via
+     `scripts/deploy-engine.sh --prod`. (App itself still undeployed — needs cloud
+     Supabase envs; the root project `causent` is linked and `.vercelignore`-scoped.)
+   - GitHub token → live ingestion via `lib/ingest/cli.ts` — **the one remaining
+     credential** (fine-grained PAT, Contents:Read on the target repo, as `GITHUB_TOKEN`
+     in `.env.local`; per SEC3/T-TOK the durable wiring is a per-connection Vault token).
 2. **Per-request freshness** — dashboard routes are statically prerendered (DB read at build
    time). Add `export const dynamic = "force-dynamic"` (or revalidation) when live freshness is
    needed. Swap the demo service-role server client for a per-request `@supabase/ssr` RLS client

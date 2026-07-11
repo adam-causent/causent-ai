@@ -36,30 +36,49 @@ Response `200`: `{ "rows": [...], "n_actions": N, "methods": [...] }`, one row p
 Guard responses: `401` (missing/wrong/unset secret), `413` (body/series/action cap),
 `400` (malformed input / unknown method), `405` (non-POST).
 
-## Deploy steps (these need human Vercel credentials — NOT done here)
+## Deploy steps — AS DEPLOYED 2026-07-11 (standalone project `causent-engine`)
 
-1. **Link the project** (once): `vercel link` in the repo root, or import the repo in the
-   Vercel dashboard. Framework auto-detects as Next.js; `api/engine.py` is auto-detected as
-   a Python function (no extra config beyond `vercel.json`).
-2. **Set the shared secret** — the app and the function must agree on it:
+**LIVE:** `https://causent-engine.vercel.app/api/engine` (production). Smoke-tested:
+GET → 405, POST without secret → `401 {"error":"unauthorized"}` (fail-closed), POST
+with secret + a 120-day synthetic series → 200; ITS recovered a +50 step as lift
+50.46 CI [49.3, 51.6] and correctly capped belief at 0.5 / AUTOCORRELATION on the
+serially-correlated synthetic noise. The honesty guards fired on request one.
+
+**Why standalone, not inside the Next.js app project:** deploying the repo as one
+project sweeps the remote build's `node_modules` + `.next` into the Python function
+bundle (378MB > the 225MB function cap), and the Python builder ignored
+`excludeFiles` in that hybrid setup (verified byte-identical bundles across three
+config variants). The engine therefore deploys from a minimal staged copy as its own
+Vercel project — which also gives it separate scaling, logs, and secrets.
+
+1. **Deploy** (stages api/engine.py + engine/causal + a minimal vercel.json +
+   pyproject.toml, links project `causent-engine`, deploys):
    ```
-   vercel env add CAUSENT_ENGINE_SECRET production
-   vercel env add CAUSENT_ENGINE_SECRET preview
+   scripts/deploy-engine.sh          # preview (NOTE: behind the team SSO wall)
+   scripts/deploy-engine.sh --prod   # production (publicly reachable, fail-closed)
    ```
-   Generate one with e.g. `openssl rand -hex 32`. The **same** value must be available to
-   the Next.js caller (as `CAUSENT_ENGINE_SECRET`, server-side only) so it can send the header.
-   The function fails closed (401) until this is set.
-3. **(Optional) pin the Python version** — Vercel's Python runtime defaults to a recent
-   3.x. To pin, add a `PYTHON_VERSION` project env var (e.g. `3.12`) per Vercel's runtime docs.
-4. **Deploy**: `vercel deploy` (preview) then `vercel deploy --prod` (production).
-5. **Smoke-test** the live URL:
+   The `pyproject.toml` carries `[tool.vercel] entrypoint = "api.engine:handler"`
+   (required by the current Python builder for BaseHTTPRequestHandler functions).
+2. **Shared secret** (already set 2026-07-11): `CAUSENT_ENGINE_SECRET` lives on the
+   `causent-engine` project (production + preview, Sensitive) AND on the app side in
+   `.env.local` so the Next.js caller can send the header. Rotate with
+   `openssl rand -hex 32` + `npx vercel env add` in a staged dir linked to
+   `causent-engine` + update `.env.local`.
+3. **Preview URLs are SSO-walled.** Vercel Deployment Protection covers team preview
+   deployments — requests get a 302/401 to `vercel.com/sso-api` before reaching the
+   function. Smoke-test against production (fail-closed by design) or use a
+   protection-bypass token.
+4. **Smoke-test** the live URL:
    ```
-   curl -s -X POST https://<deployment>/api/engine \
+   curl -s -X POST https://causent-engine.vercel.app/api/engine \
      -H "x-causent-engine-secret: $CAUSENT_ENGINE_SECRET" \
      -H "content-type: application/json" \
      -d '{"series":[...],"action_dates":["2025-02-20"]}'
    ```
    Expect `200` with `rows`; a wrong/absent secret must return `401`.
+
+The root Vercel project (`causent`) is the Next.js app only — `.vercelignore`
+excludes `api/` + `engine/`, and the root `vercel.json` carries no function config.
 
 ## Local verification (no creds needed)
 
