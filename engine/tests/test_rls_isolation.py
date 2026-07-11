@@ -61,6 +61,16 @@ EVIDENCE_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000d6")
 OBJECTIVE_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000c7")
 OBJECTIVE_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000d7")
 
+# Prospective layer (epic #6 child #7): decisions/predictions/revisions/transitions
+DECISION_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000e0")
+DECISION_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000f0")
+PREDICTION_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000e1")
+PREDICTION_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000f1")
+REVISION_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000e2")
+REVISION_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000f2")
+TRANSITION_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000e3")
+TRANSITION_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000f3")
+
 ALL_USERS = (USER_A, USER_B, USER_A_VIEWER)
 
 # Domain tables under a workspace + how to identify a row's tenant.
@@ -74,6 +84,13 @@ DOMAIN_TABLES = [
     ("public.causal_edges", "scope_id", WS_A, WS_B),
     ("public.evidence_objects", "scope_id", WS_A, WS_B),
     ("public.objectives", "scope_id", WS_A, WS_B),
+    # Prospective layer — decision_actions/prediction_revisions/transition_events
+    # carry no scope_id; their tenant resolves through the parent id.
+    ("public.decisions", "scope_id", WS_A, WS_B),
+    ("public.decision_actions", "decision_id", DECISION_A, DECISION_B),
+    ("public.predictions", "scope_id", WS_A, WS_B),
+    ("public.prediction_revisions", "prediction_id", PREDICTION_A, PREDICTION_B),
+    ("public.transition_events", "action_id", ACTION_A, ACTION_B),
 ]
 
 # Hierarchy / spine tables also carry tenant identity and must isolate too.
@@ -188,6 +205,39 @@ def _seed(conn: psycopg.Connection) -> None:
             (OBJECTIVE_A, WS_A, OBJECTIVE_B, WS_B),
         )
 
+        # prospective layer: one row per tenant in each of the 5 new tables
+        cur.execute(
+            "insert into public.decisions (decision_id, scope_id, title) values "
+            "(%s,%s,'d'),(%s,%s,'d')",
+            (DECISION_A, WS_A, DECISION_B, WS_B),
+        )
+        cur.execute(
+            "insert into public.decision_actions (decision_id, action_id, is_lever) values "
+            "(%s,%s,true),(%s,%s,true)",
+            (DECISION_A, ACTION_A, DECISION_B, ACTION_B),
+        )
+        cur.execute(
+            "insert into public.predictions (prediction_id, scope_id, decision_id, metric_id, "
+            "direction, magnitude_pct_mean, resolution_date) values "
+            "(%s,%s,%s,%s,'POSITIVE',3.0, date '2026-03-01'),"
+            "(%s,%s,%s,%s,'POSITIVE',3.0, date '2026-03-01')",
+            (PREDICTION_A, WS_A, DECISION_A, METRIC_A,
+             PREDICTION_B, WS_B, DECISION_B, METRIC_B),
+        )
+        cur.execute(
+            "insert into public.prediction_revisions (revision_id, prediction_id, "
+            "old_magnitude, new_magnitude, reason) values "
+            "(%s,%s,3.0,2.0,'r'),(%s,%s,3.0,2.0,'r')",
+            (REVISION_A, PREDICTION_A, REVISION_B, PREDICTION_B),
+        )
+        cur.execute(
+            "insert into public.transition_events (event_id, action_id, canonical, source, "
+            "provider_event_id, transition_ts) values "
+            "(%s,%s,'LEVER_SHIPPED','github','rls-evt-a', timestamptz '2026-01-02T00:00:00Z'),"
+            "(%s,%s,'LEVER_SHIPPED','github','rls-evt-b', timestamptz '2026-01-02T00:00:00Z')",
+            (TRANSITION_A, ACTION_A, TRANSITION_B, ACTION_B),
+        )
+
 
 @pytest.fixture(scope="module")
 def seeded():
@@ -260,8 +310,8 @@ def test_rls_enabled_on_every_public_table(seeded):
         rows = cur.fetchall()
     rls_off = [name for name, on in rows if not on]
     assert rls_off == [], f"RLS DISABLED on public tables: {rls_off}"
-    # sanity: we actually inspected the 11 migration tables
-    assert len(rows) >= 11, f"expected >=11 public tables, saw {len(rows)}"
+    # sanity: we actually inspected the 16 migration tables (11 + 5 prospective)
+    assert len(rows) >= 16, f"expected >=16 public tables, saw {len(rows)}"
 
 
 # ============================================================================
@@ -338,3 +388,116 @@ def test_evidence_is_append_only(seeded):
             (EVIDENCE_A,),
         )
         assert cur.fetchone()[0] == 1
+
+
+# ============================================================================
+# GATE 6 — Prospective layer (epic #6 child #7)
+# ============================================================================
+def test_member_cannot_insert_foreign_scope_prospective(seeded):
+    # A member of org A must not create decisions or predictions in org B's scope.
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "insert into public.decisions (scope_id, title) values (%s,'leak')",
+                (WS_B,),
+            )
+        conn.rollback()
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "insert into public.predictions (scope_id, decision_id, metric_id, "
+                "direction, magnitude_pct_mean, resolution_date) values "
+                "(%s,%s,%s,'POSITIVE',1.0, date '2026-03-01')",
+                (WS_B, DECISION_B, METRIC_B),
+            )
+        conn.rollback()
+
+
+def test_cross_scope_lever_link_blocked(seeded):
+    # decision_actions scopes via BOTH parents: user A cannot link org B's action
+    # into org A's decision (nor org A's action into org B's decision).
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "insert into public.decision_actions (decision_id, action_id) values (%s,%s)",
+                (DECISION_A, ACTION_B),
+            )
+        conn.rollback()
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "insert into public.decision_actions (decision_id, action_id) values (%s,%s)",
+                (DECISION_B, ACTION_A),
+            )
+        conn.rollback()
+
+
+def test_prospective_logs_are_append_only(seeded):
+    # prediction_revisions and transition_events mirror evidence_objects:
+    # UPDATE/DELETE privilege is REVOKEd from authenticated.
+    for stmt, params in [
+        ("update public.prediction_revisions set reason = 'x' where revision_id = %s",
+         (REVISION_A,)),
+        ("delete from public.prediction_revisions where revision_id = %s",
+         (REVISION_A,)),
+        ("update public.transition_events set to_status = 'x' where event_id = %s",
+         (TRANSITION_A,)),
+        ("delete from public.transition_events where event_id = %s",
+         (TRANSITION_A,)),
+    ]:
+        with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+            with pytest.raises(pgerr.InsufficientPrivilege):
+                cur.execute(stmt, params)
+            conn.rollback()
+
+
+def test_actions_source_accepts_jira_rejects_unknown(seeded):
+    # The widened CHECK admits 'jira' and still rejects a bogus value.
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute(
+            "insert into public.actions (scope_id, source) values (%s,'jira')", (WS_A,)
+        )
+        assert cur.rowcount == 1
+        conn.rollback()  # keep the seed pristine
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        with pytest.raises(pgerr.CheckViolation):
+            cur.execute(
+                "insert into public.actions (scope_id, source) values (%s,'gitlab')",
+                (WS_A,),
+            )
+        conn.rollback()
+
+
+def test_decision_delete_cascades_to_children(seeded):
+    # FK cascade: deleting a decision removes its decision_actions + predictions.
+    # Scratch rows only — the seeded decisions stay pristine.
+    scratch_decision = uuid.UUID("aaaa0000-0000-0000-0000-0000000000e9")
+    scratch_prediction = uuid.UUID("aaaa0000-0000-0000-0000-0000000000ea")
+    with seeded.cursor() as cur:
+        cur.execute(
+            "insert into public.decisions (decision_id, scope_id, title) values (%s,%s,'scratch')",
+            (scratch_decision, WS_A),
+        )
+        cur.execute(
+            "insert into public.decision_actions (decision_id, action_id) values (%s,%s)",
+            (scratch_decision, ACTION_A),
+        )
+        cur.execute(
+            "insert into public.predictions (prediction_id, scope_id, decision_id, metric_id, "
+            "direction, magnitude_pct_mean, resolution_date) values "
+            "(%s,%s,%s,%s,'POSITIVE',1.0, date '2026-03-01')",
+            (scratch_prediction, WS_A, scratch_decision, METRIC_A),
+        )
+        cur.execute(
+            "delete from public.decisions where decision_id = %s", (scratch_decision,)
+        )
+        cur.execute(
+            "select count(*) from public.decision_actions where decision_id = %s",
+            (scratch_decision,),
+        )
+        assert cur.fetchone()[0] == 0
+        cur.execute(
+            "select count(*) from public.predictions where prediction_id = %s",
+            (scratch_prediction,),
+        )
+        assert cur.fetchone()[0] == 0
