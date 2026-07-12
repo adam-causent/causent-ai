@@ -107,7 +107,7 @@ async function isAttributed(client: SupabaseClient): Promise<boolean> {
     .from("levers")
     .select("status, action:actions(external_ref)")
     .eq("decision_id", DECISION);
-  const rows = (res.data ?? []) as Array<{ status: string; action: { external_ref: string | null } | null }>;
+  const rows = (res.data ?? []) as unknown as Array<{ status: string; action: { external_ref: string | null } | null }>;
   return rows.some((r) => (r.status === "DETECTED" || r.status === "SHIPPED") && r.action?.external_ref);
 }
 
@@ -141,7 +141,7 @@ test("draft → detect materializes actions + lever and attributes the predictio
     .select("status, provenance_token, action:actions(external_ref, source)")
     .eq("provenance_token", provenanceToken(DECISION))
     .single();
-  const draftRow = afterDraft.data as { status: string; action: { external_ref: string | null; source: string } };
+  const draftRow = afterDraft.data as unknown as { status: string; action: { external_ref: string | null; source: string } };
   assert.equal(draftRow.status, "DRAFTED");
   assert.equal(draftRow.action.external_ref, null);
   assert.equal(draftRow.action.source, "github_issue");
@@ -165,7 +165,7 @@ test("draft → detect materializes actions + lever and attributes the predictio
     .select("status, action:actions(external_ref)")
     .eq("provenance_token", drafted.token)
     .single();
-  const detRow = afterDetect.data as { status: string; action: { external_ref: string | null } };
+  const detRow = afterDetect.data as unknown as { status: string; action: { external_ref: string | null } };
   assert.equal(detRow.status, "DETECTED");
   assert.equal(detRow.action.external_ref, "github:issue:77");
   assert.equal(await isAttributed(client), true, "detection attributes the prediction");
