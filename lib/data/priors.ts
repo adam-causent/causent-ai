@@ -21,7 +21,7 @@ export async function getPriorsForReferenceClass(params: {
   metricId: string;
   mechanismCategory?: string | null;
 }): Promise<ReferenceClassPriors> {
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
   const res = await sb
     .from("predictions")
     .select("resolved_verdict, resolution_tuple")

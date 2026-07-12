@@ -41,7 +41,7 @@ export async function declareOnboardingMetric(
   name: string,
 ): Promise<DeclareMetricResult | { error: string }> {
   const session = await getSession();
-  return declareMetric(getServerSupabase(), session.workspaceId, name);
+  return declareMetric(await getServerSupabase(), session.workspaceId, name);
 }
 
 /** Step 4 precedent: the reference-class priors behind the panel. On a fresh
@@ -59,7 +59,7 @@ export async function commitOnboardingPrediction(
   input: CommitInput,
 ): Promise<CommitResult> {
   const session = await getSession();
-  const result = await commitPrediction(getServerSupabase(), session.workspaceId, input);
+  const result = await commitPrediction(await getServerSupabase(), session.workspaceId, input);
   if (result.ok) revalidatePath("/actions");
   return result;
 }

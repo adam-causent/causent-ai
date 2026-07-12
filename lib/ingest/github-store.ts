@@ -9,19 +9,19 @@
 //      (supabase/migrations/20260704000000_actions_external_ref_unique.sql) makes a
 //      concurrent double-insert a no-op instead of a duplicate.
 //
-// TODO(auth): getServerSupabase() is the v1 service-role client pinned to the demo
-// scope (see lib/supabase-server.ts). Once ingestion runs under an RLS-scoped user/
-// job identity, this store is unchanged — it already writes scope_id per row and
-// RLS will gate it. The scope then comes from the caller's membership, not a pin.
+// Ingestion is a backfill JOB, not a dashboard read, so it uses the explicit
+// service-role client (getServiceRoleSupabase — #5 renamed the RLS-bypass client
+// out of the getServerSupabase read path). It already writes scope_id per row;
+// when ingestion later runs under a per-job RLS identity this store is unchanged.
 
-import { getServerSupabase } from "@/lib/supabase-server";
+import { getServiceRoleSupabase } from "@/lib/supabase-server";
 import type { ActionRow, ActionStore } from "@/lib/ingest/github";
 
 /** Postgres unique-violation SQLSTATE — a lost race against the backstop index. */
 const UNIQUE_VIOLATION = "23505";
 
 export function createSupabaseActionStore(): ActionStore {
-  const sb = getServerSupabase();
+  const sb = getServiceRoleSupabase();
   return {
     async existingRefs(scopeId: string, refs: string[]): Promise<Set<string>> {
       if (refs.length === 0) return new Set();

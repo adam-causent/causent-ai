@@ -54,7 +54,7 @@ export function edgeKey(actionId: string, metricId: string): string {
 export const loadEdgeReadouts = cache(async function loadEdgeReadouts(): Promise<
   Map<string, EdgeReadout>
 > {
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
 
   const [nodesRes, edgesRes, evidenceRes] = await Promise.all([
     sb

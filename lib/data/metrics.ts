@@ -36,7 +36,7 @@ export type MetricRecord = { metricId: string; metric: Metric };
 export const getMetricRecords = cache(async function getMetricRecords(): Promise<
   MetricRecord[]
 > {
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
 
   const metricsRes = await sb
     .from("metrics")

@@ -1,27 +1,37 @@
-// The dev-session seam (cold-start C2/#15, agreed scope for the open #5).
+// The session seam (#5 landed here). The single place the app resolves "who is
+// here and which workspace do they act in". Both funnel and dashboard writes
+// scope to session.workspaceId — unchanged callers.
 //
-// Auth itself is issue #5 (invite-only Google OAuth). Until it lands, THIS is
-// the single place the app resolves "who is here and which workspace do they
-// act in": it returns the demo workspace, matching how the /actions pages
-// resolve scope (lib/data/config.ts DEMO_SCOPE_ID + the pinned service-role
-// client). When #5 lands, getSession() swaps to reading the Supabase Auth
-// session (via @supabase/ssr) and the funnel's server actions do not change —
-// they keep calling getSession() and scoping every write to session.workspaceId.
+// Design-partner demo model: ONE shared tenant. Invited partners are provisioned
+// onto the seeded org (handle_new_user → org-level membership on ca5e…d1), so
+// every authenticated partner acts in the same seeded workspace (DEMO_SCOPE_ID).
+// RLS still gates them: a stranger with no membership reads/writes zero rows.
+// (Per-partner tenants are SEC2, deferred — see the #5 Out of Scope.)
+//
+//   - Local demo (CAUSENT_LOCAL_DEMO=1): no real login → { DEMO_SCOPE_ID, null }.
+//   - Production: reads the authenticated Supabase user for committed_by; the
+//     workspace stays the shared demo scope.
 
 import "server-only";
 
 import { DEMO_SCOPE_ID } from "@/lib/data/config";
+import { getServerSupabase, isLocalDemo } from "@/lib/supabase-server";
 
 export type CausentSession = {
-  /** The workspace every funnel write is scoped to. */
+  /** The workspace every write is scoped to (shared demo tenant in v1). */
   workspaceId: string;
-  /** null until #5 lands — committed_by stays unset on demo writes. */
+  /** The authenticated user id (populates committed_by); null in local demo. */
   userId: string | null;
 };
 
-/** The current session. Demo: the seeded workspace, no user identity. */
+/** The current session. */
 export async function getSession(): Promise<CausentSession> {
-  // TODO(#5): read the Supabase Auth session cookie here (createServerClient
-  // from @supabase/ssr) and resolve the workspace from the user's membership.
-  return { workspaceId: DEMO_SCOPE_ID, userId: null };
+  if (isLocalDemo()) {
+    return { workspaceId: DEMO_SCOPE_ID, userId: null };
+  }
+  const sb = await getServerSupabase();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  return { workspaceId: DEMO_SCOPE_ID, userId: user?.id ?? null };
 }
