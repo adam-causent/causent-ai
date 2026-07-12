@@ -14,8 +14,22 @@ Verdict machine (belief table -> verdict):
     belief 0.0/0.5 (FDR / autocorr / CI-incl-0 / placebo)      INCONCLUSIVE
     belief NULL INSUFFICIENT / INSUFFICIENT_HISTORY            GATHERING (extend)
     belief NULL DEGENERATE                                     UNRESOLVABLE
-    lever never shipped by resolution date                     VOIDED
+    shipped-lever span > MAX_CLUSTER_SPAN_DAYS                 UNRESOLVABLE
+    no lever shipped by resolution date (unshipped/DROPPED)    VOIDED
     prediction with no mapped lever                            UNATTRIBUTED
+    declared metric with no observations                       UNMEASURABLE_NO_METRIC
+
+Multi-lever (C4/#17): a prediction's effect on one metric can be carried by
+several levers. ONE shipped lever resolves exactly as before (single-
+intervention ITS on the lever edge). SEVERAL shipped levers resolve via the
+existing cluster overlay — the levers form a cluster measured as ONE
+intervention at the earliest ship date, and the prediction resolves against
+the CLUSTER -> METRIC edge's belief. If the ships span more than
+MAX_CLUSTER_SPAN_DAYS the co-occurrence premise fails and the verdict is
+UNRESOLVABLE (multi-breakpoint ITS is explicitly deferred, not attempted).
+Only SHIPPED levers count toward the intervention window; unshipped and
+DROPPED levers are excluded, and a prediction whose levers ALL dropped or
+never shipped is VOIDED.
 
 Units contract (store-both, score-native): the stored magnitude_pct_mean (%) is
 the human commitment and stays authoritative for display. At resolution the
@@ -38,10 +52,12 @@ verdicts are terminal: a re-run is a no-op.
 Honesty rules honored here:
   - Elicit-not-assert: this module only ever MEASURES a human-authored
     prediction; nothing in it generates or pre-fills a prospective number.
-  - One lever per (decision, metric): the lever lookup resolves "the lever(s)
-    for this prediction's metric" from the public.levers table (C1/#14). Two
-    levers for one (decision, metric) raise LeverConflictError loudly BEFORE
-    any write — that raise is the seam where multi-lever support (C4) lands.
+  - Same-metric multi-lever resolves via the cluster overlay (a real,
+    already-verified method) rather than a forced single breakpoint or an
+    unproven multi-intervention fit; when even the cluster premise fails
+    (ships too far apart) the honest answer is UNRESOLVABLE, not a number.
+  - A declared metric that never received observations is
+    UNMEASURABLE_NO_METRIC — stated plainly, never a fabricated readout.
 
 The connection contract mirrors the bridge: `conn` must be an INJECTED,
 RLS-scoped psycopg connection (the caller's identity — never the service
@@ -51,6 +67,7 @@ role). A cross-scope prediction is simply invisible and untouched.
 from __future__ import annotations
 
 import json
+import os
 from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -59,13 +76,25 @@ from uuid import UUID
 import numpy as np
 from psycopg import Connection
 
-from persistence.bridge import _load_metric, persist_metric_readouts
+from persistence.bridge import (
+    _load_metric,
+    persist_lever_cluster_readout,
+    persist_metric_readouts,
+)
 
 Id = UUID | str
 
 # A GATHERING verdict bumps resolution_date this far forward — matching the
 # 14-day descriptive horizon (CLUSTER_POST_WINDOW) as the natural re-check beat.
 GATHERING_EXTENSION_DAYS = 14
+
+# Ship-span guard (C4/#17): several shipped levers on one (decision, metric)
+# are measured as ONE intervention via the cluster overlay — a premise that
+# only holds when the ships co-occur. Beyond this span the honest verdict is
+# UNRESOLVABLE (forcing one breakpoint would misdate the intervention;
+# multi-breakpoint ITS is explicitly deferred). 28 days = two of the 14-day
+# descriptive post-windows: a staged rollout, not two separate bets.
+MAX_CLUSTER_SPAN_DAYS = int(os.environ.get("CAUSENT_MAX_CLUSTER_SPAN_DAYS", "28"))
 
 VERDICTS = (
     "CONFIRMED",
@@ -76,18 +105,10 @@ VERDICTS = (
     "UNRESOLVABLE",
     "VOIDED",
     "UNATTRIBUTED",
+    "UNMEASURABLE_NO_METRIC",
 )
 
 TERMINAL_VERDICTS = frozenset(v for v in VERDICTS if v != "GATHERING")
-
-
-class LeverConflictError(RuntimeError):
-    """Two levers found for one (decision, metric) — the v1 invariant is broken.
-
-    Raised loudly BEFORE any write: resolution with two intervention dates is
-    ambiguous (which ship date is the intervention? which edge resolves the
-    prediction?). This raise is the seam where multi-lever semantics would land.
-    """
 
 
 @dataclass(frozen=True)
@@ -124,20 +145,46 @@ class ResolutionResult:
 # ---------------------------------------------------------------------------
 
 
+def shipped_levers(levers: list[Lever], today: date) -> list[Lever]:
+    """The levers that count toward the intervention window: status SHIPPED
+    with a ship (effective) date on or before `today`. Unshipped and DROPPED
+    levers are excluded. Deduped by action (two levers may point at one
+    ticket); sorted by ship date so [0] is the cluster's intervention."""
+    seen: set[UUID] = set()
+    out: list[Lever] = []
+    for lv in sorted(
+        (lv for lv in levers
+         if lv.status == "SHIPPED"
+         and lv.effective_date is not None
+         and lv.effective_date <= today),
+        key=lambda lv: (lv.effective_date, str(lv.action_id)),
+    ):
+        if lv.action_id not in seen:
+            seen.add(lv.action_id)
+            out.append(lv)
+    return out
+
+
+def ship_span_days(shipped: list[Lever]) -> int:
+    """Days between the earliest and latest lever ship. 0 for a single lever."""
+    if len(shipped) < 2:
+        return 0
+    dates = [lv.effective_date for lv in shipped]
+    return (max(dates) - min(dates)).days
+
+
 def pre_verdict(levers: list[Lever], today: date) -> str | None:
-    """Verdicts decidable BEFORE measuring: no lever, or a lever that never
-    shipped by the resolution date. None means 'proceed to measurement'."""
+    """Verdicts decidable BEFORE measuring: no lever mapped (UNATTRIBUTED), no
+    lever shipped by the resolution date (VOIDED — covers all-DROPPED and
+    never-shipped alike), or shipped levers too far apart for the cluster
+    premise (UNRESOLVABLE). None means 'proceed to measurement'."""
     if not levers:
         return "UNATTRIBUTED"
-    if len(levers) > 1:
-        refs = ", ".join(lv.ref for lv in levers)
-        raise LeverConflictError(
-            f"{len(levers)} levers found for one (decision, metric) — the v1 "
-            f"one-lever invariant is broken ({refs}); refusing to resolve"
-        )
-    eff = levers[0].effective_date
-    if eff is None or eff > today:
+    shipped = shipped_levers(levers, today)
+    if not shipped:
         return "VOIDED"
+    if ship_span_days(shipped) > MAX_CLUSTER_SPAN_DAYS:
+        return "UNRESOLVABLE"
     return None
 
 
@@ -218,19 +265,21 @@ def _levers_for(conn: Connection, decision_id: Id, metric_id: Id) -> list[Lever]
 
 
 def _load_edge_state(
-    conn: Connection, scope_id: Id, action_id: Id, metric_id: Id
+    conn: Connection, scope_id: Id, source_type: str, source_ref: Id, metric_id: Id
 ) -> EdgeState | None:
-    """The materialized ACTION->METRIC edge for the lever, plus the latest
-    authoritative ITS evidence row (the raw stats the belief was projected from)."""
+    """The materialized <source>->METRIC edge for the lever (source_type
+    'ACTION' for the single-lever path, 'CLUSTER' for the multi-lever cluster
+    path), plus the latest authoritative ITS evidence row (the raw stats the
+    belief was projected from)."""
     edge = conn.execute(
         "select e.edge_id, e.direction, e.belief_score, e.belief_reason "
         "from public.causal_edges e "
         "join public.nodes s on s.node_id = e.source_node_id "
         "join public.nodes t on t.node_id = e.target_node_id "
         "where e.scope_id = %s "
-        "and s.type = 'ACTION' and s.semantic_ref = %s "
+        "and s.type = %s and s.semantic_ref = %s "
         "and t.type = 'METRIC' and t.semantic_ref = %s",
-        (scope_id, action_id, metric_id),
+        (scope_id, source_type, source_ref, metric_id),
     ).fetchone()
     if edge is None:
         return None
@@ -330,7 +379,6 @@ def resolve_prediction(
             f"due {resolution_date.isoformat()}",
         )
 
-    # Lever lookup FIRST: the duplicate-lever raise must precede any write.
     levers = _levers_for(conn, decision_id, metric_id)
     features = _reference_class_features(conn, decision_id, metric_id)
 
@@ -342,30 +390,75 @@ def resolve_prediction(
         "metric_id": str(metric_id),
     }
 
+    # A declared metric that never received observations cannot be measured —
+    # say so BEFORE any ITS runs (C1/#14 added the verdict; C4 routes it).
+    metric_meta = conn.execute(
+        "select m.source, exists(select 1 from public.metric_observations o "
+        "where o.metric_id = m.metric_id) "
+        "from public.metrics m where m.metric_id = %s",
+        (metric_id,),
+    ).fetchone()
+    if metric_meta is not None:
+        metric_source, has_observations = metric_meta
+        if metric_source == "declared" and not has_observations:
+            verdict = "UNMEASURABLE_NO_METRIC"
+            _write_terminal(conn, pid, None, verdict, {**tuple_base, "verdict": verdict})
+            conn.commit()
+            return ResolutionResult(
+                pid, "RESOLVED", verdict,
+                "declared metric has no observations — nothing to measure against",
+            )
+
     early = pre_verdict(levers, today)
     if early is not None:
-        detail = (
-            "no lever mapped — nothing to measure" if early == "UNATTRIBUTED"
-            else "the lever never shipped by the resolution date"
-        )
+        details = {
+            "UNATTRIBUTED": "no lever mapped — nothing to measure",
+            "VOIDED": "no lever shipped by the resolution date "
+                      "(unshipped or DROPPED)",
+            "UNRESOLVABLE": (
+                f"shipped-lever ships span {ship_span_days(shipped_levers(levers, today))} "
+                f"days > MAX_CLUSTER_SPAN_DAYS={MAX_CLUSTER_SPAN_DAYS} — "
+                "the co-occurrence premise fails; refusing to force one breakpoint"
+            ),
+        }
         _write_terminal(conn, pid, None, early, {**tuple_base, "verdict": early})
         conn.commit()
-        return ResolutionResult(pid, "RESOLVED", early, detail)
+        return ResolutionResult(pid, "RESOLVED", early, details[early])
 
-    lever = levers[0]
-    tuple_base["lever_action_id"] = str(lever.action_id)
-    tuple_base["lever_ref"] = lever.ref
+    shipped = shipped_levers(levers, today)
 
     # Measure through the real bridge (idempotent upsert; commits internally).
     persist_metric_readouts(conn, scope_id, metric_id)
 
-    edge = _load_edge_state(conn, scope_id, lever.action_id, metric_id)
+    if len(shipped) == 1:
+        # Single lever — the unchanged single-intervention path.
+        lever = shipped[0]
+        tuple_base["lever_action_id"] = str(lever.action_id)
+        tuple_base["lever_ref"] = lever.ref
+        edge = _load_edge_state(conn, scope_id, "ACTION", lever.action_id, metric_id)
+        intervention_date = lever.effective_date
+    else:
+        # Multi-lever — cluster overlay: one intervention at the earliest ship,
+        # resolved against the CLUSTER -> METRIC edge (C4/#17).
+        tuple_base["lever_action_ids"] = [str(lv.action_id) for lv in shipped]
+        tuple_base["lever_refs"] = [lv.ref for lv in shipped]
+        tuple_base["ship_span_days"] = ship_span_days(shipped)
+        cluster_id = persist_lever_cluster_readout(
+            conn, scope_id, metric_id, [lv.action_id for lv in shipped]
+        )
+        tuple_base["cluster_id"] = None if cluster_id is None else str(cluster_id)
+        edge = (
+            None if cluster_id is None
+            else _load_edge_state(conn, scope_id, "CLUSTER", cluster_id, metric_id)
+        )
+        intervention_date = shipped[0].effective_date
 
-    # The scoring denominator: the exact pre-window the ITS saw for this lever.
+    # The scoring denominator: the exact pre-window the ITS saw for this
+    # intervention (the cluster's window opens at the earliest lever ship).
     metric = _load_metric(conn, metric_id)
     denom = None
-    if metric is not None and lever.effective_date is not None:
-        split = bisect_left(metric.ordinals, lever.effective_date.toordinal())
+    if metric is not None and intervention_date is not None:
+        split = bisect_left(metric.ordinals, intervention_date.toordinal())
         denom = pre_window_mean_for(metric.series.values, split)
 
     predicted_native = predicted_native_value(

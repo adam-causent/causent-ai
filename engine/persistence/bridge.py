@@ -291,18 +291,20 @@ def persist_metric_readouts(conn: Connection, scope_id: Id, metric_id: Id) -> No
 
 
 def _persist_clusters(conn: Connection, scope_id: Id, metric_id: Id, metric_node_id: UUID,
-                      metric: _LoadedMetric, clusters: list[_Cluster]) -> None:
+                      metric: _LoadedMetric, clusters: list[_Cluster]) -> list[UUID]:
     """Overlay: a CLUSTER node + CLUSTER -> METRIC edge per collision group, with
     its own ITS readout (the group treated as one intervention at its earliest
     member's split). Members keep their own ACTION -> METRIC edges — this only
-    adds; it never deletes or zeroes a member."""
+    adds; it never deletes or zeroes a member. Returns the cluster ids."""
     if not clusters:
-        return
+        return []
+    cluster_ids: list[UUID] = []
     readouts = batch_readout(
         metric.series, [(f"cluster:{i}", c.split) for i, c in enumerate(clusters)]
     )
     for readout, cluster in zip(readouts, clusters):
         cluster_id = _upsert_cluster(conn, scope_id, metric_id, cluster)
+        cluster_ids.append(cluster_id)
         conn.execute(
             "update public.actions set cluster_id = %s where action_id = any(%s)",
             (cluster_id, [a.action_id for a in cluster.members]),
@@ -317,3 +319,59 @@ def _persist_clusters(conn: Connection, scope_id: Id, metric_id: Id, metric_node
         _append_before_after_evidence(
             conn, scope_id, edge_id, None, cluster_id, readout.before_after, True
         )
+    return cluster_ids
+
+
+def persist_lever_cluster_readout(
+    conn: Connection, scope_id: Id, metric_id: Id, action_ids: list[UUID]
+) -> UUID | None:
+    """Materialize the multi-lever cluster (C4/#17): a CLUSTER node +
+    CLUSTER -> METRIC edge over exactly these lever actions, measured as ONE
+    intervention at the earliest ship date — single-intervention ITS on the
+    cluster's combined window, via the same collision-overlay writers (no new
+    ITS method). Idempotent like the collision overlay (the cluster upserts on
+    its stable (scope, metric, window_start) identity). Returns the cluster_id,
+    or None when the metric has no observations or no member has shipped.
+
+    `conn` must be RLS-scoped as the caller, exactly like persist_metric_readouts.
+    """
+    metric = _load_metric(conn, metric_id)
+    if metric is None:
+        return None
+    metric_row = conn.execute(
+        "select scope_id, name from public.metrics where metric_id = %s", (metric_id,)
+    ).fetchone()
+    if metric_row is None:
+        return None
+    metric_scope_id, metric_display = metric_row
+    if str(metric_scope_id) != str(scope_id):
+        raise ValueError(
+            f"metric {metric_id} belongs to scope {metric_scope_id}, not the passed "
+            f"scope {scope_id}; refusing cross-scope materialization"
+        )
+
+    rows = conn.execute(
+        "select action_id, external_ref, source, effective_date from public.actions "
+        "where action_id = any(%s) and effective_date is not null "
+        "order by effective_date, action_id",
+        (list(action_ids),),
+    ).fetchall()
+    members = [
+        _Action(action_id, external_ref or source, eff,
+                bisect_left(metric.ordinals, eff.toordinal()))
+        for action_id, external_ref, source, eff in rows
+    ]
+    if not members:
+        return None
+    cluster = _Cluster(
+        members,
+        members[0].effective_date,
+        members[-1].effective_date + CLUSTER_POST_WINDOW,
+        members[0].split,
+    )
+    metric_node_id = _upsert_node(conn, scope_id, "METRIC", metric_id, metric_display)
+    cluster_ids = _persist_clusters(
+        conn, scope_id, metric_id, metric_node_id, metric, [cluster]
+    )
+    conn.commit()
+    return cluster_ids[0]
