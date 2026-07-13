@@ -82,7 +82,7 @@ function mapPrediction(row: PredictionRow): Prediction {
 
 /** All decisions in the demo scope, newest first, actions mapped to UI ids. */
 export async function getDecisions(): Promise<Decision[]> {
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
 
   const [decisionsRes, actionsRes] = await Promise.all([
     sb

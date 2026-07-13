@@ -55,7 +55,7 @@ function paragraphs(doc: RationaleDoc | null): string[] {
  * neutral "—" ("gathering data" / inconclusive).
  */
 export async function getActions(): Promise<Action[]> {
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
 
   const [actionsRes, records, edges] = await Promise.all([
     sb

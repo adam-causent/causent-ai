@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { DecisionCard } from "@/lib/onboarding/parse";
 import { MECHANISM_CATEGORIES } from "@/lib/onboarding/parse";
 import type { ReferenceClassPriors } from "@/lib/priors";
+import { LeverCreate } from "@/components/onboarding/LeverCreate";
 import {
   commitOnboardingPrediction,
   declareOnboardingMetric,
@@ -35,6 +36,10 @@ type DeclaredMetric = {
 
 type Committed = {
   predictionId: string;
+  decisionId: string;
+  metricId: string;
+  mechanismSummary: string;
+  mechanismCategory: string;
   title: string;
   metricName: string;
   direction: "POSITIVE" | "NEGATIVE";
@@ -239,6 +244,10 @@ export function OnboardingFunnel() {
       }
       setCommitted({
         predictionId: res.predictionId,
+        decisionId: res.decisionId,
+        metricId: declared.metricId,
+        mechanismSummary,
+        mechanismCategory,
         title,
         metricName: declared.name,
         direction,
@@ -483,11 +492,19 @@ export function OnboardingFunnel() {
                 : `Resolves ${committed.resolutionDate}.`}
             </p>
             <p className="rounded border border-dashed border-[var(--border)] p-2 text-[12px] text-[var(--text-muted)]">
-              Unattributed — no work item carries this mechanism yet. Connect the
-              tracker and anchor the lever ticket (next step, coming soon) so Causent
-              can warn you the moment the work drifts from this prediction.
+              Unattributed — no work item carries this mechanism yet. Arm the
+              drift watch below so Causent can warn you the moment the work drifts
+              from this prediction.
             </p>
           </div>
+
+          <LeverCreate
+            decisionId={committed.decisionId}
+            metricId={committed.metricId}
+            title={committed.title}
+            mechanismSummary={committed.mechanismSummary}
+            mechanismCategory={committed.mechanismCategory}
+          />
           <div className="flex items-center gap-3">
             <Link href="/actions" className={primaryBtn}>
               Open the decision log

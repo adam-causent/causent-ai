@@ -271,9 +271,13 @@ max_frequency = "5s"
 # inactivity_timeout = "8h"
 
 # This hook runs before a new user is created and allows developers to reject the request based on the incoming user object.
-# [auth.hook.before_user_created]
-# enabled = true
-# uri = "pg-functions://postgres/auth/before-user-created-hook"
+# Causent (#5): invite-only allowlist gate. enforce_allowlist rejects any email
+# not in public.allowed_emails BEFORE GoTrue inserts the auth.users row, so a
+# non-invited Google account never persists (no orphan). See the
+# 20260712052812_auth_allowlist.sql migration.
+[auth.hook.before_user_created]
+enabled = true
+uri = "pg-functions://postgres/public/enforce_allowlist"
 
 # This hook runs before a token is issued and allows you to add additional claims based on the authentication method used.
 # [auth.hook.custom_access_token]
@@ -327,6 +331,23 @@ url = ""
 # If enabled, the nonce check will be skipped. Required for local sign in with Google auth.
 skip_nonce_check = false
 # If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
+email_optional = false
+
+# Causent (#5): Google OAuth is the sole login provider for the design-partner
+# demo. Left `enabled = false` in the committed config because there is no local
+# Google client — enabling it with empty creds would fail `supabase start`. To
+# run a REAL Google login (prod or a local end-to-end test), set the two env
+# vars below and flip `enabled = true`. Client id/secret come from a Google
+# Cloud OAuth Web client whose authorized redirect URI is
+# https://<project>.supabase.co/auth/v1/callback (see OVERNIGHT_REPORT_5.md →
+# PRODUCTION SETUP REQUIRED). skip_nonce_check is required for local Google.
+[auth.external.google]
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+redirect_uri = ""
+url = ""
+skip_nonce_check = true
 email_optional = false
 
 # Allow Solana wallet holders to sign in to your project via the Sign in with Solana (SIWS, EIP-4361) standard.

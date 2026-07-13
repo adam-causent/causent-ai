@@ -16,7 +16,7 @@ type ObjectiveRow = {
 
 /** The demo scope's north-star objective, or null if none is set. */
 export async function getObjective(): Promise<ProjectObjective | null> {
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
   const res = await sb
     .from("objectives")
     .select("title, statement, key_results, updated_at")

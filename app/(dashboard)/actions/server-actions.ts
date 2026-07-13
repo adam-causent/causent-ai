@@ -34,7 +34,7 @@ async function actionRow(
 ): Promise<{ action_id: string; source: string; effective_date: string | null } | null> {
   const pr = uiId.match(/^a-(\d+)$/)?.[1];
   if (!pr) return null;
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
   const res = await sb
     .from("actions")
     .select("action_id, source, effective_date")
@@ -55,7 +55,7 @@ async function actionRow(
 async function metricUuid(slug: string): Promise<string | null> {
   const name = METRIC_CONFIG_BY_SLUG[slug]?.name;
   if (!name) return null;
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
   const res = await sb
     .from("metrics")
     .select("metric_id")
@@ -90,7 +90,7 @@ export async function createDecisionWithPrediction(input: {
     return { ok: false, errors: ["The selected lever action was not found."] };
   }
 
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
   const rationale = {
     type: "doc",
     content: input.why.trim()
@@ -159,7 +159,7 @@ export async function revisePrediction(input: {
   });
   if (errors.length > 0) return { ok: false, errors };
 
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
   const current = await sb
     .from("predictions")
     .select("magnitude_pct_mean, direction, resolved_at")

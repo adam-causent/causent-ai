@@ -12,7 +12,7 @@ type WorkspaceRow = {
 
 /** The demo scope's display names (org / project / workspace). */
 export async function getScope(): Promise<Scope> {
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
   const res = await sb
     .from("workspaces")
     .select("name, projects(name, orgs(name))")
