@@ -95,6 +95,33 @@ export type PredictionRevision = {
   revisedAt: string;
 };
 
+/** Detector status for baseline drift (mirrors engine causal.types.DriftStatus). */
+export type DriftStatus = "FIRED" | "NOT_FIRED" | "NO_BASELINE_YET";
+
+/**
+ * Baseline-drift readout for a prediction, computed ON READ by the engine
+ * (persistence/drift_read.py) — never persisted. A baseline move is a FACT, not a
+ * verdict: `direction` is the metric's movement only. Levels are the plainly-shown
+ * before/after segment means; the fire decision rests on the fitted step CI.
+ */
+export type DriftReadout = {
+  status: DriftStatus;
+  reason: string | null;
+  /** ISO yyyy-mm-dd of the detected change-point; null unless FIRED. */
+  shiftDate: string | null;
+  /** In-window baseline before/after the shift, native metric units. */
+  preLevel: number | null;
+  postLevel: number | null;
+  deltaNative: number | null;
+  /** Signed baseline move relative to |preLevel|, in %. */
+  pctChange: number | null;
+  direction: "up" | "down" | null;
+  ciLow: number | null;
+  ciHigh: number | null;
+  nPre: number;
+  nPost: number;
+};
+
 /**
  * A human pre-registered prediction (elicit-not-assert: the TEAM commits this
  * number; the engine only measures it at resolutionDate). Mirrors the
@@ -117,6 +144,12 @@ export type Prediction = {
   /** Measured %-of-mean from the resolution tuple (display only; null = none). */
   measuredPct: number | null;
   revisions: PredictionRevision[];
+  /**
+   * Baseline drift on the predicted metric, computed on read (null = not computed:
+   * a resolved prediction, or the engine read was unavailable). The notice renders
+   * from this — FIRED shows the calm assert-fact card.
+   */
+  drift?: DriftReadout | null;
 };
 
 /**

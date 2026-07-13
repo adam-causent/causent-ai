@@ -2,9 +2,10 @@
 // `decision_actions` + `predictions` (+ revisions) tables to lib/types.ts
 // Decision. Mirrors lib/seed.ts `decisions`. Newest first.
 
-import type { Decision, Prediction, PredictionVerdict } from "@/lib/types";
+import type { Decision, DriftReadout, Prediction, PredictionVerdict } from "@/lib/types";
 import { getServerSupabase } from "@/lib/supabase-server";
 import { DEMO_SCOPE_ID, METRIC_CONFIG_BY_NAME } from "@/lib/data/config";
+import { getDriftByPrediction } from "@/lib/data/drift";
 
 type RationaleDoc = {
   content?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
@@ -56,7 +57,10 @@ function paragraphs(doc: RationaleDoc | null): string[] {
   return out;
 }
 
-function mapPrediction(row: PredictionRow): Prediction {
+function mapPrediction(
+  row: PredictionRow,
+  driftByPrediction: Map<string, DriftReadout>,
+): Prediction {
   const metricName = row.metric?.name ?? "";
   const measured = row.resolution_tuple?.measured_pct;
   return {
@@ -69,6 +73,8 @@ function mapPrediction(row: PredictionRow): Prediction {
     verdict: (row.resolved_verdict as PredictionVerdict | null) ?? null,
     resolvedAt: row.resolved_at ? row.resolved_at.slice(0, 10) : null,
     measuredPct: typeof measured === "number" ? measured : null,
+    // Baseline drift, computed on read (empty map when the engine is unavailable).
+    drift: driftByPrediction.get(row.prediction_id) ?? null,
     revisions: row.prediction_revisions
       .map((r) => ({
         oldMagnitudePct: r.old_magnitude ?? 0,
@@ -84,7 +90,7 @@ function mapPrediction(row: PredictionRow): Prediction {
 export async function getDecisions(): Promise<Decision[]> {
   const sb = await getServerSupabase();
 
-  const [decisionsRes, actionsRes] = await Promise.all([
+  const [decisionsRes, actionsRes, driftByPrediction] = await Promise.all([
     sb
       .from("decisions")
       .select(
@@ -98,6 +104,8 @@ export async function getDecisions(): Promise<Decision[]> {
       .order("created_at", { ascending: false }),
     // uuid -> UI "a-<pr>" id map (same derivation as lib/data/actions.ts).
     sb.from("actions").select("action_id, external_ref").eq("scope_id", DEMO_SCOPE_ID),
+    // Baseline drift, computed on read through the engine (empty on any failure).
+    getDriftByPrediction(),
   ]);
   if (decisionsRes.error) throw decisionsRes.error;
   if (actionsRes.error) throw actionsRes.error;
@@ -125,7 +133,7 @@ export async function getDecisions(): Promise<Decision[]> {
         (da) => uiIdByUuid.get(da.action_id) ?? da.action_id,
       ),
       leverActionId: lever ? (uiIdByUuid.get(lever.action_id) ?? lever.action_id) : null,
-      predictions: row.predictions.map(mapPrediction),
+      predictions: row.predictions.map((p) => mapPrediction(p, driftByPrediction)),
     };
   });
 }

@@ -35,10 +35,15 @@ export const METRIC_CONFIG_BY_NAME: Record<string, MetricConfig> = {
   "Churn Rate": { id: "churn", color: "#E5484D", higherIsBetter: false },
   "Gross Profit": { id: "grossProfit", color: "#F0B73E", higherIsBetter: true },
   "Support Tickets": { id: "support", color: "#8B5CF6", higherIsBetter: false },
+  // Drift beat (C5/#18): a New-User Activation metric whose baseline slides under
+  // a committed prediction. Higher is better; blue keeps it activation-family.
+  "New-User Activation": { id: "newActivation", color: "#377DED", higherIsBetter: true },
 };
 
 /** Canonical UI metric order (slugs), matching lib/seed.ts metrics[]. */
-export const METRIC_ORDER = ["arr", "activation", "churn", "grossProfit", "support"];
+export const METRIC_ORDER = [
+  "arr", "activation", "churn", "grossProfit", "support", "newActivation",
+];
 
 /** Lookup config by slug (used when we only have the UI id in hand). */
 export const METRIC_CONFIG_BY_SLUG: Record<string, MetricConfig & { name: string }> =
