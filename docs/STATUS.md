@@ -1,6 +1,6 @@
 # Causent — Build Status & Resume Guide
 
-Last updated: 2026-07-12. Single source of truth for "where are we and how do I pick up."
+Last updated: 2026-07-13. Single source of truth for "where are we and how do I pick up."
 Product: **dual cold-start on one causal graph** — the retrospective wedge ("Did-It-Ship,
 Did-It-Work": tie each shipped action to a metric, honest ITS readout) PLUS the prospective
 on-ramp (human pre-registered prediction → drift watch → engine-measured resolution). See
@@ -41,8 +41,13 @@ is the critical path.** Remaining credential: a GitHub token (live ingestion).
 ✓ PIVOT    prospective-prediction-loop design approved + docs on main (2026-07-11)
 ✓ PROSPECT Foundations tranche MERGED (PR #12, 2026-07-12): intent schema + verdict
            machine + priors + decisions-first Actions tab + seed (1110 pytest, 245 lib)
-☐ PARTNER  zero-code mechanism-mapping test  ← gates Tranche 2 (connector) + 3 (drift)
-☐ LIVE     GitHub token (ingest)  ← the one remaining credential
+✓ COLDSTART C1+C4 MERGED (PR #20, 2026-07-13): levers table (multi-lever, drops
+           is_lever), declared metric + UNMEASURABLE_NO_METRIC, cluster-resolution path
+✓ AUTH     #5 invite-only Google-OAuth allowlist + create-from-decision GitHub connector
+           scaffolding MERGED (PR #21, 2026-07-13); prod stays open via CAUSENT_LOCAL_DEMO=1
+☐ PARTNER  zero-code mechanism-mapping test  ← gates T2 connector completion + T3 drift
+☐ LIVE     GitHub App + fine-grained PAT  ← the remaining credentials (#16 goes live)
+☐ OPEN     #15 onboarding funnel polish · #16 connector live · #18 drift surface · #19 Jira
 ```
 
 ## What's built (all on `main`, verified against live evidence)
@@ -221,6 +226,21 @@ tabs. Structure (as-built lives at repo root, NOT `/src`):
   (VOIDED) → 12 actions total. `lib/seed.ts` mirrors the story (incl. landmarks #8107/#8256,
   which the TS seed previously lacked).
 
+## Cold-Start tranche — as built (2026-07-13, PRs #20 + #21)
+
+- **PR #20 (closes #14, #17)** — `levers` table (multi-lever incl. same-metric via cluster
+  overlay; `decision_actions.is_lever` dropped), declared metric on the prediction,
+  `UNMEASURABLE_NO_METRIC` verdict, `resolve.py` multi-lever cluster-resolution path +
+  ship-span guard, onboarding funnel + `LeverCreate` UI (progresses #15). Migration
+  `20260712040728_cold_start_levers.sql`.
+- **PR #21 (closes #5, progresses #16)** — invite-only Google-OAuth allowlist
+  (`proxy.ts` guard + `lib/auth/*` + `scripts/invite.ts` + migration
+  `20260712052812_auth_allowlist.sql`; Next 16 middleware→proxy rename) and the
+  create-from-decision GitHub read-only connector spine (`lib/connectors/github*.ts`,
+  webhook + reconcile-levers cron routes, deep-link+paste flow). Connector is INERT until
+  the live GitHub App + PAT land. Gates green at merge: 1128 pytest, 262 lib tests.
+  Evidence: `docs/OVERNIGHT_REPORT_5.md`, QA shots `docs/qa/auth-connector-20260712/`.
+
 ## Next (priority order)
 
 The four items above (UI↔Supabase, ingestion, engine deploy, summary layer) are now **BUILT
@@ -243,7 +263,11 @@ and verified locally** on `overnight/wire-up`. What remains:
    time). Add `export const dynamic = "force-dynamic"` (or revalidation) when live freshness is
    needed. Swap the demo service-role server client for a per-request `@supabase/ssr` RLS client
    (TODO in `lib/supabase-server.ts`) once real auth/session wiring lands.
-3. **Auth** — multi-provider (email + Google + GitHub + SSO) via Supabase (SEC2).
+3. ~~**Auth**~~ — **invite-only Google-OAuth allowlist LANDED (PR #21, 2026-07-13)**:
+   `proxy.ts` session refresh + route guard, `lib/auth/{invite,session}.ts`,
+   `scripts/invite.ts`, allowlist migration. Production demo stays open behind
+   `CAUSENT_LOCAL_DEMO=1` (flip off + configure Google OAuth in Supabase to arm the wall).
+   Multi-provider (email + GitHub + SSO) remains later work (SEC2).
 4. **Design polish** — run `/plan-design-review` → `/design-review`; also fix the stale "Last 30
    Days vs Prior 30 Days" subtitle on the Impact-by-Metric panel (bars are net confident causal
    ITS lift across all history, not period-over-period). ImpactBar axis ticks, static account menu.
