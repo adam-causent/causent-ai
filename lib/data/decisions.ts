@@ -36,7 +36,9 @@ type DecisionRow = {
   title: string;
   rationale: RationaleDoc | null;
   created_at: string;
-  decision_actions: Array<{ action_id: string; is_lever: boolean }>;
+  decision_actions: Array<{ action_id: string }>;
+  // An action is a lever iff it has a levers row (C1/#14).
+  levers: Array<{ action_id: string; status: string }>;
   predictions: PredictionRow[];
 };
 
@@ -87,7 +89,7 @@ export async function getDecisions(): Promise<Decision[]> {
       .from("decisions")
       .select(
         "decision_id, title, rationale, created_at, " +
-          "decision_actions(action_id, is_lever), " +
+          "decision_actions(action_id), levers(action_id, status), " +
           "predictions(prediction_id, direction, magnitude_pct_mean, resolution_date, " +
           "committed_at, resolved_verdict, resolved_at, resolution_tuple, " +
           "metric:metrics(name), prediction_revisions(old_magnitude, new_magnitude, reason, revised_at))",
@@ -110,7 +112,7 @@ export async function getDecisions(): Promise<Decision[]> {
   );
 
   return (decisionsRes.data as unknown as DecisionRow[]).map((row) => {
-    const lever = row.decision_actions.find((da) => da.is_lever);
+    const lever = row.levers[0] ?? null;
     return {
       id: row.decision_id,
       title: row.title,

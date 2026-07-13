@@ -3,16 +3,18 @@
 Two layers:
 
   UNIT — the pure verdict machine (pre_verdict / verdict_for /
-  predicted_native_value / pre_window_mean_for) exercised with synthetic
-  belief-table states: all 8 verdicts, sign-primary + in-CI bonus semantics,
-  the native/pct conversion contract, and the duplicate-lever raise.
+  predicted_native_value / pre_window_mean_for / shipped_levers /
+  ship_span_days) exercised with synthetic belief-table states: all verdicts,
+  sign-primary + in-CI bonus semantics, the native/pct conversion contract,
+  and the multi-lever cluster-window derivation + ship-span guard (C4/#17).
 
   INTEGRATION — live DB gate (local Supabase, like test_bridge_e2e): a seeded
   tenant with one metric (120 daily points, +40 step at index 50) and levers
   placed to force each belief-table state through the REAL bridge, then
   resolve_due_predictions() as the RLS-scoped owner. Asserts the persisted
   verdicts, the memory tuple, GATHERING's date extension, idempotent re-runs,
-  the loud duplicate-lever raise with no partial write, and cross-scope
+  the multi-lever cluster path (CLUSTER edge, window, span guard, all-dropped
+  VOIDED, declared-metric UNMEASURABLE_NO_METRIC), and cross-scope
   invisibility under RLS.
 
 The CONFIRMED prediction's magnitude is derived from the engine's own oracle
@@ -35,18 +37,20 @@ import pytest
 
 from causal.its_readout import its_readout
 from causal.types import Series
-from persistence.bridge import _load_metric
+from persistence.bridge import CLUSTER_POST_WINDOW, _load_metric
 from persistence.resolve import (
     GATHERING_EXTENSION_DAYS,
+    MAX_CLUSTER_SPAN_DAYS,
     EdgeState,
     Lever,
-    LeverConflictError,
     ResolutionResult,
     pre_verdict,
     pre_window_mean_for,
     predicted_native_value,
     resolve_due_predictions,
     resolve_prediction,
+    ship_span_days,
+    shipped_levers,
     verdict_for,
 )
 
@@ -69,8 +73,8 @@ def _edge(direction=POS, belief=1.0, reason=None, lift=40.0, ci=(38.0, 42.0)):
     )
 
 
-def _lever(effective=date(2026, 2, 20)):
-    return Lever(uuid.uuid4(), "PR #1", effective)
+def _lever(effective=date(2026, 2, 20), status="SHIPPED", action_id=None):
+    return Lever(action_id or uuid.uuid4(), "PR #1", effective, status)
 
 
 # --- the 8 verdicts, one belief-table state each -----------------------------
@@ -166,11 +170,50 @@ def test_predicted_native_uses_abs_denominator():
     assert predicted_native_value(5.0, POS, -200.0) == pytest.approx(10.0)
 
 
-# --- the duplicate-lever raise ------------------------------------------------
+# --- multi-lever: cluster-window derivation + ship-span guard (C4/#17) --------
 
-def test_two_levers_for_one_decision_metric_raise_loudly():
-    with pytest.raises(LeverConflictError):
-        pre_verdict([_lever(), _lever()], TODAY)
+def test_shipped_levers_filter_dedupe_and_order():
+    # The cluster's members: SHIPPED-with-a-ship-date-by-today only, deduped by
+    # action, sorted by ship date — so [0]'s ship date IS the cluster's single
+    # intervention (its window opens there).
+    a_early, a_late = uuid.uuid4(), uuid.uuid4()
+    early = _lever(effective=date(2026, 2, 1), action_id=a_early)
+    late = _lever(effective=date(2026, 2, 10), action_id=a_late)
+    ignored = [
+        _lever(status="DROPPED"),                                # dropped
+        _lever(effective=None, status="CREATED"),                # never shipped
+        _lever(effective=TODAY + timedelta(days=5)),             # future ship
+        _lever(effective=date(2026, 2, 3), action_id=a_early),   # dup action
+    ]
+    shipped = shipped_levers([late, *ignored, early], TODAY)
+    assert [lv.action_id for lv in shipped] == [a_early, a_late]
+    assert shipped[0].effective_date == date(2026, 2, 1)
+    assert ship_span_days(shipped) == 9
+    assert ship_span_days(shipped[:1]) == 0
+
+
+def test_ship_span_guard_boundary_is_inclusive():
+    # span == MAX_CLUSTER_SPAN_DAYS still clusters; one day beyond refuses.
+    first = _lever(effective=date(2026, 2, 1))
+    at_max = _lever(
+        effective=date(2026, 2, 1) + timedelta(days=MAX_CLUSTER_SPAN_DAYS))
+    beyond = _lever(
+        effective=date(2026, 2, 1) + timedelta(days=MAX_CLUSTER_SPAN_DAYS + 1))
+    assert pre_verdict([first, at_max], TODAY) is None
+    assert pre_verdict([first, beyond], TODAY) == "UNRESOLVABLE"
+
+
+def test_all_dropped_or_unshipped_levers_are_voided():
+    # Levers exist but none count toward an intervention: VOIDED, even when a
+    # DROPPED lever's ticket had shipped before being dropped.
+    assert pre_verdict(
+        [_lever(status="DROPPED"), _lever(effective=None, status="CREATED")],
+        TODAY,
+    ) == "VOIDED"
+
+
+def test_two_shipped_levers_within_span_proceed_to_measurement():
+    assert pre_verdict([_lever(), _lever(effective=date(2026, 2, 25))], TODAY) is None
 
 
 # ============================================================================
@@ -188,6 +231,7 @@ WS_F = uuid.UUID("f0f0f000-0000-0000-0000-0000000000b2")
 USER_F = uuid.UUID("f0f0f111-0000-0000-0000-0000000000b9")  # foreign: no grant on WS
 
 METRIC = uuid.UUID("f0f0e000-0000-0000-0000-0000000000c0")
+METRIC_DECL = uuid.UUID("f0f0e000-0000-0000-0000-0000000000c5")  # declared, no obs
 
 ACT_LEVER = uuid.UUID("f0f0e000-0000-0000-0000-0000000000c1")   # split 50: belief 1.0
 ACT_FLAT = uuid.UUID("f0f0e000-0000-0000-0000-0000000000c2")    # split 74: CI incl 0
@@ -202,7 +246,11 @@ D_INC = uuid.UUID("f0f0e000-0000-0000-0000-0000000000d3")
 D_GATH = uuid.UUID("f0f0e000-0000-0000-0000-0000000000d4")
 D_VOID = uuid.UUID("f0f0e000-0000-0000-0000-0000000000d5")
 D_UNATTR = uuid.UUID("f0f0e000-0000-0000-0000-0000000000d6")
-D_DUP = uuid.UUID("f0f0e000-0000-0000-0000-0000000000d7")
+D_PEND = uuid.UUID("f0f0e000-0000-0000-0000-0000000000d7")  # multi-lever, not yet due
+D_CLUS = uuid.UUID("f0f0e000-0000-0000-0000-0000000000d8")  # cluster path (span ok)
+D_SPAN = uuid.UUID("f0f0e000-0000-0000-0000-0000000000d9")  # ships too far apart
+D_DROP = uuid.UUID("f0f0e000-0000-0000-0000-0000000000da")  # all levers dropped
+D_NOM = uuid.UUID("f0f0e000-0000-0000-0000-0000000000db")   # declared metric, no obs
 
 P_CONF = uuid.UUID("f0f0e000-0000-0000-0000-0000000000e0")
 P_DIR = uuid.UUID("f0f0e000-0000-0000-0000-0000000000e1")
@@ -211,7 +259,11 @@ P_INC = uuid.UUID("f0f0e000-0000-0000-0000-0000000000e3")
 P_GATH = uuid.UUID("f0f0e000-0000-0000-0000-0000000000e4")
 P_VOID = uuid.UUID("f0f0e000-0000-0000-0000-0000000000e5")
 P_UNATTR = uuid.UUID("f0f0e000-0000-0000-0000-0000000000e6")
-P_DUP = uuid.UUID("f0f0e000-0000-0000-0000-0000000000e7")
+P_PEND = uuid.UUID("f0f0e000-0000-0000-0000-0000000000e7")
+P_CLUS = uuid.UUID("f0f0e000-0000-0000-0000-0000000000e8")
+P_SPAN = uuid.UUID("f0f0e000-0000-0000-0000-0000000000e9")
+P_DROP = uuid.UUID("f0f0e000-0000-0000-0000-0000000000ea")
+P_NOM = uuid.UUID("f0f0e000-0000-0000-0000-0000000000eb")
 
 SERIES_START = date(2026, 1, 1)
 SERIES_DAYS = 120
@@ -283,6 +335,12 @@ def _seed(conn: psycopg.Connection) -> float:
             "insert into public.metrics (metric_id, scope_id, name, source, unit) "
             "values (%s,%s,'Resolve Gate Metric','csv','count')",
             (METRIC, WS))
+        # Declared metric (C1/#14): name-only, NO observations — the funnel's
+        # cold-start substrate. Resolution must say UNMEASURABLE_NO_METRIC.
+        cur.execute(
+            "insert into public.metrics (metric_id, scope_id, name, source, unit) "
+            "values (%s,%s,'Declared Unwired Metric','declared','count')",
+            (METRIC_DECL, WS))
         cur.executemany(
             "insert into public.metric_observations (metric_id, obs_date, value) values (%s,%s,%s)",
             [(METRIC, _day(i), float(v)) for i, v in enumerate(values)])
@@ -303,7 +361,9 @@ def _seed(conn: psycopg.Connection) -> float:
             (D_CONF, "Confirmed decision"), (D_DIR, "Direction-only decision"),
             (D_REF, "Refuted decision"), (D_INC, "Inconclusive decision"),
             (D_GATH, "Gathering decision"), (D_VOID, "Voided decision"),
-            (D_UNATTR, "Unattributed decision"), (D_DUP, "Duplicate-lever decision"),
+            (D_UNATTR, "Unattributed decision"), (D_PEND, "Pending multi-lever decision"),
+            (D_CLUS, "Cluster-path decision"), (D_SPAN, "Span-guard decision"),
+            (D_DROP, "All-levers-dropped decision"), (D_NOM, "Declared-metric decision"),
         ]
         for decision_id, title in decisions:
             cur.execute(
@@ -312,17 +372,44 @@ def _seed(conn: psycopg.Connection) -> float:
                 (decision_id, WS, title,
                  json.dumps({"meta": {"mechanism_category": "conversion-funnel"}})))
 
+        # An action is a lever iff it has a levers row (C1/#14); decision_actions
+        # keeps the plain decision->action linkage. lever_metric None = mapped
+        # but NOT a lever.
         links = [
-            (D_CONF, ACT_LEVER, True), (D_DIR, ACT_LEVER, True), (D_REF, ACT_LEVER, True),
-            (D_INC, ACT_FLAT, True), (D_GATH, ACT_LATE, True), (D_VOID, ACT_NEVER, True),
-            (D_UNATTR, ACT_FLAT, False),               # mapped but NOT a lever
-            (D_DUP, ACT_LEVER, True), (D_DUP, ACT_FLAT, True),  # invariant broken
+            (D_CONF, ACT_LEVER, METRIC, "SHIPPED"),
+            (D_DIR, ACT_LEVER, METRIC, "SHIPPED"),
+            (D_REF, ACT_LEVER, METRIC, "SHIPPED"),
+            (D_INC, ACT_FLAT, METRIC, "SHIPPED"),
+            (D_GATH, ACT_LATE, METRIC, "SHIPPED"),
+            (D_VOID, ACT_NEVER, METRIC, "CREATED"),     # never shipped
+            (D_UNATTR, ACT_FLAT, None, None),           # mapped but NOT a lever
+            # same-metric multi-lever, prediction not yet due (stays unresolved)
+            (D_PEND, ACT_LEVER, METRIC, "SHIPPED"),
+            (D_PEND, ACT_FLAT, METRIC, "SHIPPED"),
+            # cluster path: ships day 50 + day 74 (span 24 <= MAX 28)
+            (D_CLUS, ACT_LEVER, METRIC, "SHIPPED"),
+            (D_CLUS, ACT_FLAT, METRIC, "SHIPPED"),
+            # span guard: ships day 50 + day 100 (span 50 > MAX 28)
+            (D_SPAN, ACT_LEVER, METRIC, "SHIPPED"),
+            (D_SPAN, ACT_LATE, METRIC, "SHIPPED"),
+            # all levers dropped (one of them HAD shipped before the drop)
+            (D_DROP, ACT_LEVER, METRIC, "DROPPED"),
+            (D_DROP, ACT_FLAT, METRIC, "DROPPED"),
+            # declared metric with no observations; the lever itself shipped
+            (D_NOM, ACT_LEVER, METRIC_DECL, "SHIPPED"),
         ]
-        for decision_id, action_id, is_lever in links:
+        for i, (decision_id, action_id, lever_metric, status) in enumerate(links):
             cur.execute(
-                "insert into public.decision_actions (decision_id, action_id, is_lever) "
-                "values (%s,%s,%s)",
-                (decision_id, action_id, is_lever))
+                "insert into public.decision_actions (decision_id, action_id) "
+                "values (%s,%s) on conflict do nothing",
+                (decision_id, action_id))
+            if lever_metric is not None:
+                cur.execute(
+                    "insert into public.levers (scope_id, decision_id, action_id, "
+                    "metric_id, provenance_token, target_source, status) "
+                    "values (%s,%s,%s,%s,%s,'github',%s)",
+                    (WS, decision_id, action_id, lever_metric,
+                     f"resolve-lever-{i}", status))
 
     # Oracle: the engine's own readout of the DB-roundtripped series, so the
     # CONFIRMED magnitude is dead-center in the measured CI by construction.
@@ -334,23 +421,27 @@ def _seed(conn: psycopg.Connection) -> float:
 
     with conn.cursor() as cur:
         predictions = [
-            (P_CONF, D_CONF, "POSITIVE", oracle_pct, DUE),
-            (P_DIR, D_DIR, "POSITIVE", oracle_pct * 3.0, DUE),
-            (P_REF, D_REF, "NEGATIVE", oracle_pct, DUE),
-            (P_INC, D_INC, "POSITIVE", 5.0, DUE),
-            (P_GATH, D_GATH, "POSITIVE", 5.0, DUE),
-            (P_VOID, D_VOID, "POSITIVE", 5.0, DUE),
-            (P_UNATTR, D_UNATTR, "POSITIVE", 5.0, DUE),
-            (P_DUP, D_DUP, "POSITIVE", 5.0, NOT_DUE),
+            (P_CONF, D_CONF, METRIC, "POSITIVE", oracle_pct, DUE),
+            (P_DIR, D_DIR, METRIC, "POSITIVE", oracle_pct * 3.0, DUE),
+            (P_REF, D_REF, METRIC, "NEGATIVE", oracle_pct, DUE),
+            (P_INC, D_INC, METRIC, "POSITIVE", 5.0, DUE),
+            (P_GATH, D_GATH, METRIC, "POSITIVE", 5.0, DUE),
+            (P_VOID, D_VOID, METRIC, "POSITIVE", 5.0, DUE),
+            (P_UNATTR, D_UNATTR, METRIC, "POSITIVE", 5.0, DUE),
+            (P_PEND, D_PEND, METRIC, "POSITIVE", 5.0, NOT_DUE),
+            # the cluster's intervention is the earliest ship (day 50), so the
+            # oracle magnitude lands in the cluster edge's CI too
+            (P_CLUS, D_CLUS, METRIC, "POSITIVE", oracle_pct, DUE),
+            (P_SPAN, D_SPAN, METRIC, "POSITIVE", 5.0, DUE),
+            (P_DROP, D_DROP, METRIC, "POSITIVE", 5.0, DUE),
+            (P_NOM, D_NOM, METRIC_DECL, "POSITIVE", 5.0, DUE),
         ]
-        for pid, decision_id, direction, magnitude, due in predictions:
+        for pid, decision_id, metric_id, direction, magnitude, due in predictions:
             cur.execute(
                 "insert into public.predictions (prediction_id, scope_id, decision_id, "
                 "metric_id, direction, magnitude_pct_mean, resolution_date) "
                 "values (%s,%s,%s,%s,%s,%s,%s)",
-                (pid, WS, decision_id, direction, magnitude, due)
-                if False else
-                (pid, WS, decision_id, METRIC, direction, magnitude, due))
+                (pid, WS, decision_id, metric_id, direction, magnitude, due))
     return oracle_pct
 
 
@@ -389,6 +480,10 @@ def test_e2e_verdicts_land_as_seeded(resolved):
         P_GATH: "GATHERING",
         P_VOID: "VOIDED",
         P_UNATTR: "UNATTRIBUTED",
+        P_CLUS: "CONFIRMED",              # multi-lever via the cluster edge
+        P_SPAN: "UNRESOLVABLE",           # ships too far apart to cluster
+        P_DROP: "VOIDED",                 # every lever dropped
+        P_NOM: "UNMEASURABLE_NO_METRIC",  # declared metric, no observations
     }
     got = {pid: _verdict_row(conn, pid)[0] for pid in expected}
     assert got == expected
@@ -454,20 +549,80 @@ def test_e2e_rerun_is_idempotent(resolved):
     assert _verdict_row(conn, P_CONF) == before[P_CONF]
 
 
-def test_e2e_duplicate_lever_raises_with_no_partial_write(resolved):
+# --- multi-lever cluster path (C4/#17) ----------------------------------------
+
+def test_e2e_multi_lever_resolves_via_cluster_edge(resolved):
+    # Two shipped levers on one metric, ships within the span window: the
+    # prediction resolves against a CLUSTER -> METRIC edge measured as ONE
+    # intervention at the earliest ship (day 50) — so the oracle magnitude
+    # derived at split 50 lands CONFIRMED, same as the single-lever case.
     conn, _, _ = resolved
-    with as_user(USER) as user_conn:
-        with pytest.raises(LeverConflictError):
-            resolve_prediction(user_conn, P_DUP, today=TODAY, force=True)
-    verdict, resolved_at, edge_id, _, tup = _verdict_row(conn, P_DUP)
-    assert (verdict, resolved_at, edge_id, tup) == (None, None, None, None)
+    verdict, resolved_at, edge_id, _, tup = _verdict_row(conn, P_CLUS)
+    assert verdict == "CONFIRMED"
+    assert resolved_at is not None and edge_id is not None
+    assert tup["cluster_id"] is not None
+    assert set(tup["lever_refs"]) == {"PR #9001", "PR #9002"}
+    assert tup["ship_span_days"] == 24
+    src_type = conn.execute(
+        "select s.type from public.causal_edges e "
+        "join public.nodes s on s.node_id = e.source_node_id "
+        "where e.edge_id = %s", (edge_id,)).fetchone()[0]
+    assert src_type == "CLUSTER"
+    # the persisted cluster window: [earliest ship, latest ship + post-window]
+    window = conn.execute(
+        "select window_start, window_end from public.clusters where cluster_id = %s",
+        (uuid.UUID(tup["cluster_id"]),)).fetchone()
+    assert window == (_day(50), _day(74) + CLUSTER_POST_WINDOW)
+
+
+def test_e2e_single_lever_tuple_shape_unchanged(resolved):
+    # Regression: the single-lever memory tuple keeps its singular fields and
+    # gains NO cluster fields (byte-for-byte path separation).
+    conn, _, _ = resolved
+    tup = _verdict_row(conn, P_CONF)[4]
+    assert tup["lever_ref"] == "PR #9001"
+    assert "cluster_id" not in tup and "lever_refs" not in tup
+
+
+def test_e2e_ship_span_guard_unresolvable(resolved):
+    # Ships 50 days apart (> MAX_CLUSTER_SPAN_DAYS): the co-occurrence premise
+    # fails; the honest verdict is UNRESOLVABLE with no edge, not a forced fit.
+    conn, results, _ = resolved
+    verdict, resolved_at, edge_id, _, tup = _verdict_row(conn, P_SPAN)
+    assert verdict == "UNRESOLVABLE"
+    assert resolved_at is not None and edge_id is None
+    assert tup["verdict"] == "UNRESOLVABLE"
+    detail = {r.prediction_id: r.detail for r in results}[P_SPAN]
+    assert "MAX_CLUSTER_SPAN_DAYS" in detail
+
+
+def test_e2e_all_dropped_levers_voided(resolved):
+    conn, _, _ = resolved
+    verdict, resolved_at, edge_id, _, tup = _verdict_row(conn, P_DROP)
+    assert verdict == "VOIDED"
+    assert resolved_at is not None and edge_id is None
+
+
+def test_e2e_declared_metric_no_observations_unmeasurable(resolved):
+    # Declared metric, zero observations: UNMEASURABLE_NO_METRIC before any
+    # ITS — no edge, no fabricated readout, lever presence notwithstanding.
+    conn, results, _ = resolved
+    verdict, resolved_at, edge_id, _, tup = _verdict_row(conn, P_NOM)
+    assert verdict == "UNMEASURABLE_NO_METRIC"
+    assert resolved_at is not None and edge_id is None
+    assert tup["verdict"] == "UNMEASURABLE_NO_METRIC"
+    # and no evidence/edge was ever materialized for the declared metric
+    n_nodes = conn.execute(
+        "select count(*) from public.nodes where semantic_ref = %s",
+        (METRIC_DECL,)).fetchone()[0]
+    assert n_nodes == 0
 
 
 def test_e2e_cross_scope_prediction_invisible_and_untouched(resolved):
     conn, _, _ = resolved
     with as_user(USER_F) as foreign_conn:
-        result = resolve_prediction(foreign_conn, P_DUP, today=TODAY, force=True)
+        result = resolve_prediction(foreign_conn, P_PEND, today=TODAY, force=True)
         assert result.status == "SKIPPED_NOT_VISIBLE"
         sweep = resolve_due_predictions(foreign_conn, WS, today=TODAY)
         assert sweep == []
-    assert _verdict_row(conn, P_DUP)[0] is None
+    assert _verdict_row(conn, P_PEND)[0] is None

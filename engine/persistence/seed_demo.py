@@ -382,9 +382,18 @@ def _seed_prospective(conn: psycopg.Connection,
                 (_decision_uuid(n), SCOPE, title, json.dumps(rationale), USER),
             )
             cur.execute(
-                "insert into public.decision_actions (decision_id, action_id, is_lever) "
-                "values (%s,%s,true)",
+                "insert into public.decision_actions (decision_id, action_id) "
+                "values (%s,%s)",
                 (_decision_uuid(n), _action_uuid(lever_pr)),
+            )
+            # The lever mark lives in public.levers (C1/#14). PR #8440 never
+            # shipped (the VOIDED story): detected but not SHIPPED.
+            cur.execute(
+                "insert into public.levers (scope_id, decision_id, action_id, "
+                "metric_id, provenance_token, target_source, status) "
+                "values (%s,%s,%s,%s,%s,'github',%s)",
+                (SCOPE, _decision_uuid(n), _action_uuid(lever_pr), metric_id,
+                 f"causent-seed-d{n}", "SHIPPED" if lever_pr != 8440 else "DETECTED"),
             )
             cur.execute(
                 "insert into public.predictions (prediction_id, scope_id, decision_id, "

@@ -34,7 +34,6 @@ import psycopg
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from persistence.resolve import (  # noqa: E402
-    LeverConflictError,
     resolve_due_predictions,
     resolve_prediction,
 )
@@ -94,9 +93,6 @@ def main(argv: list[str] | None = None) -> int:
             ]
         else:
             results = resolve_due_predictions(conn, args.scope, today=today)
-    except LeverConflictError as err:
-        print(f"LEVER CONFLICT: {err}")
-        return 1
     finally:
         conn.close()
 

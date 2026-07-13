@@ -71,6 +71,10 @@ REVISION_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000f2")
 TRANSITION_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000e3")
 TRANSITION_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000f3")
 
+# Cold-start layer (epic #13 child C1/#14): levers
+LEVER_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000e4")
+LEVER_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000f4")
+
 ALL_USERS = (USER_A, USER_B, USER_A_VIEWER)
 
 # Domain tables under a workspace + how to identify a row's tenant.
@@ -91,6 +95,8 @@ DOMAIN_TABLES = [
     ("public.predictions", "scope_id", WS_A, WS_B),
     ("public.prediction_revisions", "prediction_id", PREDICTION_A, PREDICTION_B),
     ("public.transition_events", "action_id", ACTION_A, ACTION_B),
+    # Cold-start layer — levers carry their own scope_id.
+    ("public.levers", "scope_id", WS_A, WS_B),
 ]
 
 # Hierarchy / spine tables also carry tenant identity and must isolate too.
@@ -212,8 +218,8 @@ def _seed(conn: psycopg.Connection) -> None:
             (DECISION_A, WS_A, DECISION_B, WS_B),
         )
         cur.execute(
-            "insert into public.decision_actions (decision_id, action_id, is_lever) values "
-            "(%s,%s,true),(%s,%s,true)",
+            "insert into public.decision_actions (decision_id, action_id) values "
+            "(%s,%s),(%s,%s)",
             (DECISION_A, ACTION_A, DECISION_B, ACTION_B),
         )
         cur.execute(
@@ -236,6 +242,17 @@ def _seed(conn: psycopg.Connection) -> None:
             "(%s,%s,'LEVER_SHIPPED','github','rls-evt-a', timestamptz '2026-01-02T00:00:00Z'),"
             "(%s,%s,'LEVER_SHIPPED','github','rls-evt-b', timestamptz '2026-01-02T00:00:00Z')",
             (TRANSITION_A, ACTION_A, TRANSITION_B, ACTION_B),
+        )
+
+        # cold-start layer: one lever per tenant (mechanism carrier for the
+        # decision's prediction on the tenant's metric)
+        cur.execute(
+            "insert into public.levers (lever_id, scope_id, decision_id, action_id, "
+            "metric_id, provenance_token, target_source, status) values "
+            "(%s,%s,%s,%s,%s,'rls-lever-a','github','SHIPPED'),"
+            "(%s,%s,%s,%s,%s,'rls-lever-b','github','SHIPPED')",
+            (LEVER_A, WS_A, DECISION_A, ACTION_A, METRIC_A,
+             LEVER_B, WS_B, DECISION_B, ACTION_B, METRIC_B),
         )
 
 
@@ -310,8 +327,8 @@ def test_rls_enabled_on_every_public_table(seeded):
         rows = cur.fetchall()
     rls_off = [name for name, on in rows if not on]
     assert rls_off == [], f"RLS DISABLED on public tables: {rls_off}"
-    # sanity: we actually inspected the 16 migration tables (11 + 5 prospective)
-    assert len(rows) >= 16, f"expected >=16 public tables, saw {len(rows)}"
+    # sanity: we actually inspected the 17 migration tables (11 + 5 prospective + levers)
+    assert len(rows) >= 17, f"expected >=17 public tables, saw {len(rows)}"
 
 
 # ============================================================================
@@ -464,6 +481,113 @@ def test_actions_source_accepts_jira_rejects_unknown(seeded):
             cur.execute(
                 "insert into public.actions (scope_id, source) values (%s,'gitlab')",
                 (WS_A,),
+            )
+        conn.rollback()
+
+
+# ============================================================================
+# GATE 7 — Cold-start levers (epic #13 child C1/#14)
+# ============================================================================
+def test_levers_member_reads_and_writes_own_scope(seeded):
+    # A member can read the scope's levers and insert/update new ones; a viewer
+    # can read but not write (mirrors the metrics/objectives policy shape).
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute("select count(*) from public.levers where scope_id = %s", (WS_A,))
+        assert cur.fetchone()[0] == 1
+        cur.execute(
+            "insert into public.levers (scope_id, decision_id, action_id, metric_id, "
+            "provenance_token, target_source) values (%s,%s,%s,%s,'rls-lever-a2','github')",
+            (WS_A, DECISION_A, ACTION_A, METRIC_A),
+        )
+        assert cur.rowcount == 1
+        cur.execute(
+            "update public.levers set status = 'CREATED' "
+            "where provenance_token = 'rls-lever-a2'"
+        )
+        assert cur.rowcount == 1
+        conn.rollback()  # keep the seed pristine
+    with as_user(USER_A_VIEWER, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute("select count(*) from public.levers where scope_id = %s", (WS_A,))
+        assert cur.fetchone()[0] == 1
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "insert into public.levers (scope_id, decision_id, action_id, metric_id, "
+                "provenance_token, target_source) values (%s,%s,%s,%s,'rls-lever-vw','github')",
+                (WS_A, DECISION_A, ACTION_A, METRIC_A),
+            )
+        conn.rollback()
+
+
+def test_levers_cross_tenant_denied(seeded):
+    # User A sees zero of org B's levers and cannot insert into org B's scope.
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute("select count(*) from public.levers where scope_id = %s", (WS_B,))
+        assert cur.fetchone()[0] == 0
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "insert into public.levers (scope_id, decision_id, action_id, metric_id, "
+                "provenance_token, target_source) values (%s,%s,%s,%s,'rls-lever-x','github')",
+                (WS_B, DECISION_B, ACTION_B, METRIC_B),
+            )
+        conn.rollback()
+
+
+def test_levers_same_metric_double_insert_allowed(seeded):
+    # NO unique(decision_id, metric_id): two levers on one (decision, metric)
+    # both insert (the C4 cluster path resolves them).
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute(
+            "insert into public.levers (scope_id, decision_id, action_id, metric_id, "
+            "provenance_token, target_source) values "
+            "(%s,%s,%s,%s,'rls-lever-m1','github'),"
+            "(%s,%s,%s,%s,'rls-lever-m2','github')",
+            (WS_A, DECISION_A, ACTION_A, METRIC_A,
+             WS_A, DECISION_A, ACTION_A, METRIC_A),
+        )
+        assert cur.rowcount == 2
+        # provenance_token stays the idempotency key: a duplicate token is refused.
+        with pytest.raises(pgerr.UniqueViolation):
+            cur.execute(
+                "insert into public.levers (scope_id, decision_id, action_id, metric_id, "
+                "provenance_token, target_source) values (%s,%s,%s,%s,'rls-lever-m1','github')",
+                (WS_A, DECISION_A, ACTION_A, METRIC_A),
+            )
+        conn.rollback()
+
+
+def test_cold_start_enum_values(seeded):
+    # metrics.source admits 'declared' (and still rejects a bogus value);
+    # predictions.resolved_verdict admits 'UNMEASURABLE_NO_METRIC';
+    # levers.status/target_source reject values outside the lifecycle.
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute(
+            "insert into public.metrics (scope_id, name, source) values (%s,'declared m','declared')",
+            (WS_A,),
+        )
+        assert cur.rowcount == 1
+        conn.rollback()
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        with pytest.raises(pgerr.CheckViolation):
+            cur.execute(
+                "insert into public.metrics (scope_id, name, source) values (%s,'bad','psychic')",
+                (WS_A,),
+            )
+        conn.rollback()
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute(
+            "update public.predictions set resolved_verdict = 'UNMEASURABLE_NO_METRIC' "
+            "where prediction_id = %s",
+            (PREDICTION_A,),
+        )
+        assert cur.rowcount == 1
+        conn.rollback()
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        with pytest.raises(pgerr.CheckViolation):
+            cur.execute(
+                "insert into public.levers (scope_id, decision_id, action_id, metric_id, "
+                "provenance_token, target_source, status) values "
+                "(%s,%s,%s,%s,'rls-lever-bad','github','TELEPORTED')",
+                (WS_A, DECISION_A, ACTION_A, METRIC_A),
             )
         conn.rollback()
 

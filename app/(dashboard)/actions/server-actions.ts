@@ -28,19 +28,27 @@ import {
 
 type ActionResult = { ok: true } | { ok: false; errors: string[] };
 
-/** UI "a-<pr>" id -> DB action uuid (via external_ref, as lib/data maps it). */
-async function actionUuid(uiId: string): Promise<string | null> {
+/** UI "a-<pr>" id -> DB action row (via external_ref, as lib/data maps it). */
+async function actionRow(
+  uiId: string,
+): Promise<{ action_id: string; source: string; effective_date: string | null } | null> {
   const pr = uiId.match(/^a-(\d+)$/)?.[1];
   if (!pr) return null;
   const sb = getServerSupabase();
   const res = await sb
     .from("actions")
-    .select("action_id")
+    .select("action_id, source, effective_date")
     .eq("scope_id", DEMO_SCOPE_ID)
     .eq("external_ref", `PR #${pr}`)
     .maybeSingle();
   if (res.error) throw res.error;
-  return (res.data as { action_id: string } | null)?.action_id ?? null;
+  return (
+    (res.data as {
+      action_id: string;
+      source: string;
+      effective_date: string | null;
+    } | null) ?? null
+  );
 }
 
 /** UI metric slug -> DB metric uuid (via the canonical name mapping). */
@@ -75,10 +83,10 @@ export async function createDecisionWithPrediction(input: {
 
   const metricId = await metricUuid(input.prediction.metricId);
   if (!metricId) return { ok: false, errors: ["Unknown metric."] };
-  const leverUuid = input.prediction.leverActionId
-    ? await actionUuid(input.prediction.leverActionId)
+  const lever = input.prediction.leverActionId
+    ? await actionRow(input.prediction.leverActionId)
     : null;
-  if (input.prediction.leverActionId && !leverUuid) {
+  if (input.prediction.leverActionId && !lever) {
     return { ok: false, errors: ["The selected lever action was not found."] };
   }
 
@@ -99,13 +107,26 @@ export async function createDecisionWithPrediction(input: {
   if (decisionRes.error) return { ok: false, errors: [decisionRes.error.message] };
   const decisionId = (decisionRes.data as { decision_id: string }).decision_id;
 
-  if (leverUuid) {
+  if (lever) {
     const daRes = await sb.from("decision_actions").insert({
       decision_id: decisionId,
-      action_id: leverUuid,
-      is_lever: true,
+      action_id: lever.action_id,
     });
     if (daRes.error) return { ok: false, errors: [daRes.error.message] };
+    // The lever mark lives in public.levers (C1/#14). This maps an EXISTING
+    // action, so the draft->detect lifecycle is already past detection:
+    // SHIPPED when the action has an effective (ship) date, else DETECTED.
+    const leverRes = await sb.from("levers").insert({
+      scope_id: DEMO_SCOPE_ID,
+      decision_id: decisionId,
+      action_id: lever.action_id,
+      metric_id: metricId,
+      provenance_token: `causent-${crypto.randomUUID()}`,
+      target_source: lever.source === "jira" ? "jira" : "github",
+      status: lever.effective_date ? "SHIPPED" : "DETECTED",
+      detected_at: new Date().toISOString(),
+    });
+    if (leverRes.error) return { ok: false, errors: [leverRes.error.message] };
   }
 
   const predRes = await sb.from("predictions").insert({
