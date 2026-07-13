@@ -191,3 +191,38 @@ class ActionReadout:
     before_after: BeforeAfterResult
     placebo: PlaceboResult
     belief: Belief
+
+
+# Baseline-drift detector (C5/#18 — the demo's hero signal). Three outcomes:
+# FIRED           a significant level shift sits in the pre-intervention window;
+# NOT_FIRED       no shift big/credible enough (flat, noise, or below the floor);
+# NO_BASELINE_YET the metric has no observations, or too few in-window points to
+#                 fit any change-point ("gathering baseline" — NEVER a fire).
+# A baseline move is a FACT, not a verdict: `direction` is the metric's movement,
+# never a win/loss judgement (the notice renders it in neutral, not red/green).
+DriftStatus = Literal["FIRED", "NOT_FIRED", "NO_BASELINE_YET"]
+
+
+@dataclass(frozen=True)
+class DriftResult:
+    """Output of detect_baseline_drift (C5/#18). Computed on read, never persisted
+    for the demo. Levels are the plainly-shown before/after segment means ("baseline
+    moved 20% -> 12%"); the fire decision is driven by the segmented_ols step CI +
+    a magnitude floor, so significance is rigorous while display stays legible.
+
+    reason carries WHY, for the UI copy and audit:
+      fired · no_significant_shift · below_floor · no_observations · gathering_baseline
+    """
+
+    status: DriftStatus
+    shift_ordinal: int | None = None   # ordinal day of the detected change-point
+    pre_level: float | None = None     # in-window pre-segment mean
+    post_level: float | None = None    # in-window post-segment mean
+    delta_native: float | None = None  # post_level - pre_level (native metric units)
+    pct_change: float | None = None    # signed move relative to |pre_level|, in %
+    direction: Literal["up", "down"] | None = None  # baseline movement (a fact)
+    ci_low: float | None = None        # fitted step CI (native units)
+    ci_high: float | None = None
+    n_pre: int = 0                     # in-window points before the shift
+    n_post: int = 0                    # in-window points on/after the shift
+    reason: str | None = None
