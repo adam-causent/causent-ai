@@ -75,7 +75,10 @@ export type Action = {
 
 export type PredictionDirection = "POSITIVE" | "NEGATIVE";
 
-/** The 8-state resolution verdict machine (docs/designs/prospective-prediction-loop.md). */
+/** The 9-state resolution verdict machine (docs/designs/prospective-prediction-loop.md).
+ *  UNMEASURABLE_NO_METRIC (C1/#14) is the declared-metric-never-wired terminal:
+ *  the resolution scorecard renders a connect/self-report prompt for it, never a
+ *  blank or error. */
 export type PredictionVerdict =
   | "CONFIRMED"
   | "DIRECTION_CONFIRMED"
@@ -84,7 +87,26 @@ export type PredictionVerdict =
   | "GATHERING"
   | "UNRESOLVABLE"
   | "VOIDED"
-  | "UNATTRIBUTED";
+  | "UNATTRIBUTED"
+  | "UNMEASURABLE_NO_METRIC";
+
+/** The subset of the resolution memory tuple the scorecard reads (C5/#18).
+ *  Written by engine/persistence/resolve.py; all fields optional because a
+ *  GATHERING / UNMEASURABLE_NO_METRIC tuple carries no measured side. */
+export type ResolutionTuple = {
+  predicted_direction?: string | null;
+  predicted_magnitude_pct?: number | null;
+  predicted_native?: number | null;
+  pre_window_mean?: number | null;
+  measured_direction?: string | null;
+  measured_lift?: number | null;
+  measured_pct?: number | null;
+  ci_low?: number | null;
+  ci_high?: number | null;
+  belief_score?: number | null;
+  belief_reason?: string | null;
+  verdict?: string | null;
+} | null;
 
 /** One logged change to a committed prediction — a revision is data, not a failure. */
 export type PredictionRevision = {
@@ -143,6 +165,9 @@ export type Prediction = {
   resolvedAt: string | null;
   /** Measured %-of-mean from the resolution tuple (display only; null = none). */
   measuredPct: number | null;
+  /** The resolution memory tuple (predicted-vs-measured shaping for the
+   *  scorecard, C5/#18); null until resolved or when the engine wrote none. */
+  resolutionTuple?: ResolutionTuple;
   revisions: PredictionRevision[];
   /**
    * Baseline drift on the predicted metric, computed on read (null = not computed:

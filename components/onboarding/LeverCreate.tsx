@@ -20,6 +20,8 @@ type Props = {
   title: string;
   mechanismSummary: string;
   mechanismCategory?: string | null;
+  /** Fires when the lever is attributed — the funnel advances to ship state. */
+  onAttributed?: (externalRef: string, url: string) => void;
 };
 
 type Phase = "connect" | "create" | "attributed";
@@ -73,6 +75,7 @@ export function LeverCreate(props: Props) {
       }
       setExternalRef(res.externalRef);
       setPhase("attributed");
+      props.onAttributed?.(res.externalRef, issueUrl.trim());
     });
   }
 

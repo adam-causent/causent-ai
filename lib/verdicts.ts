@@ -92,6 +92,15 @@ export const VERDICT_PRESENTATION: Record<PredictionVerdict, VerdictPresentation
     glyph: "!",
     terminal: true,
   },
+  UNMEASURABLE_NO_METRIC: {
+    verdict: "UNMEASURABLE_NO_METRIC",
+    label: "No metric wired",
+    caveat:
+      "You declared this metric but never connected a data source, so there's nothing to measure against. Connect the metric to score it, or self-report the outcome.",
+    tone: "neutral",
+    glyph: "⊙",
+    terminal: true,
+  },
 };
 
 export const ALL_VERDICTS = Object.keys(VERDICT_PRESENTATION) as PredictionVerdict[];

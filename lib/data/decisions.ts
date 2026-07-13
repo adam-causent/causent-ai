@@ -2,7 +2,13 @@
 // `decision_actions` + `predictions` (+ revisions) tables to lib/types.ts
 // Decision. Mirrors lib/seed.ts `decisions`. Newest first.
 
-import type { Decision, DriftReadout, Prediction, PredictionVerdict } from "@/lib/types";
+import type {
+  Decision,
+  DriftReadout,
+  Prediction,
+  PredictionVerdict,
+  ResolutionTuple,
+} from "@/lib/types";
 import { getServerSupabase } from "@/lib/supabase-server";
 import { DEMO_SCOPE_ID, METRIC_CONFIG_BY_NAME } from "@/lib/data/config";
 import { getDriftByPrediction } from "@/lib/data/drift";
@@ -27,7 +33,7 @@ type PredictionRow = {
   committed_at: string;
   resolved_verdict: string | null;
   resolved_at: string | null;
-  resolution_tuple: { measured_pct?: number | null } | null;
+  resolution_tuple: ResolutionTuple;
   metric: { name: string } | null;
   prediction_revisions: RevisionRow[];
 };
@@ -73,6 +79,7 @@ function mapPrediction(
     verdict: (row.resolved_verdict as PredictionVerdict | null) ?? null,
     resolvedAt: row.resolved_at ? row.resolved_at.slice(0, 10) : null,
     measuredPct: typeof measured === "number" ? measured : null,
+    resolutionTuple: row.resolution_tuple ?? null,
     // Baseline drift, computed on read (empty map when the engine is unavailable).
     drift: driftByPrediction.get(row.prediction_id) ?? null,
     revisions: row.prediction_revisions

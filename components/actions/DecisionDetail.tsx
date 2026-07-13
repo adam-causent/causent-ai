@@ -1,19 +1,42 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import type { Action, Decision, Metric, Prediction } from "@/lib/types";
 import { Delta } from "@/components/ui/Delta";
 import { VerdictBadge } from "@/components/actions/VerdictBadge";
 import { DriftNotice } from "@/components/actions/DriftNotice";
 import { MechanismChain } from "@/components/actions/MechanismChain";
+import { Scorecard } from "@/components/reports/Scorecard";
 import { presentVerdict } from "@/lib/verdicts";
 import { validateRevision } from "@/lib/predictions";
-import { revisePrediction, resolveNow } from "@/app/(dashboard)/actions/server-actions";
+import {
+  revisePrediction,
+  resolveNow,
+  recordScorecardView,
+} from "@/app/(dashboard)/actions/server-actions";
 
 // The decision detail view (replaces the action-centric DecisionEditor):
 // intent (rationale) → the actions carrying it (lever marked) → the
 // pre-registered predictions with their honest resolution readout. The trust
 // caveat LEADS every readout.
+
+/** The quiet mid-window nudge (C5/#18): when nothing has drifted and the
+ *  prediction hasn't resolved, the app stays calm and just says how long is
+ *  left. Absent a resolution date it renders nothing. */
+function MidWindowTouch({ resolutionDate }: { resolutionDate: string }) {
+  const due = Date.parse(resolutionDate);
+  if (Number.isNaN(due)) return null;
+  const days = Math.max(0, Math.ceil((due - Date.now()) / 86_400_000));
+  return (
+    <p className="mt-1 text-[12px] text-[var(--text-subtle)]">
+      <span aria-hidden="true">⧗ </span>
+      Still on track — nothing has drifted.{" "}
+      {days === 0
+        ? "Resolves today."
+        : `${days} day${days === 1 ? "" : "s"} to resolution (${resolutionDate}).`}
+    </p>
+  );
+}
 
 function PredictionRow({
   prediction,
@@ -27,6 +50,13 @@ function PredictionRow({
   const [reason, setReason] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
   const [pending, startTransition] = useTransition();
+
+  // Resolution-return instrumentation (#18): one SCORECARD_VIEW per resolved
+  // prediction shown. Fire-and-forget; the verdict/prediction id keys dedupe.
+  useEffect(() => {
+    if (!prediction.verdict) return;
+    void recordScorecardView({ predictionId: prediction.id, verdict: prediction.verdict });
+  }, [prediction.id, prediction.verdict]);
 
   const dirUp = prediction.direction === "POSITIVE";
   const good = metric ? dirUp === metric.higherIsBetter : dirUp;
@@ -90,6 +120,20 @@ function PredictionRow({
 
       {/* Baseline-drift notice — the hero signal, on the prediction card (C5/#18). */}
       <DriftNotice prediction={prediction} metric={metric} />
+
+      {/* Mid-window touch: a calm "still on track, N days to resolution" nudge
+          when nothing has changed — unresolved and no baseline drift (C5/#18). */}
+      {!prediction.verdict && prediction.drift?.status !== "FIRED" && (
+        <MidWindowTouch resolutionDate={prediction.resolutionDate} />
+      )}
+
+      {/* Resolution scorecard: the Step-7 payoff — predicted-vs-measured once
+          the engine resolves, plus the GATHERING / UNMEASURABLE surfaces (#18). */}
+      {prediction.verdict && (
+        <div className="mt-2">
+          <Scorecard prediction={prediction} metric={metric} />
+        </div>
+      )}
 
       {prediction.revisions.length > 0 && (
         <ul className="mt-2 border-l-2 border-[var(--border)] pl-2 text-[11px] text-[var(--text-subtle)]">

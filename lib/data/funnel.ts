@@ -46,6 +46,41 @@ export async function recordFunnelEvent(
   return { ok: true };
 }
 
+/** Resolution-return rate (#18): of the scope's RESOLVED predictions, the
+ *  fraction whose scorecard has been viewed at least once. Prediction-keyed (via
+ *  SCORECARD_VIEW meta.prediction_id) so it survives across browser sessions —
+ *  distinct from computeFunnelMetrics' funnel-session return rate. Returns null
+ *  when nothing has resolved yet. */
+export async function getResolutionReturnRate(
+  sb: SupabaseClient,
+  scopeId: string,
+): Promise<{ resolved: number; returned: number; rate: number | null }> {
+  const [resolvedRes, viewsRes] = await Promise.all([
+    sb
+      .from("predictions")
+      .select("prediction_id", { count: "exact", head: true })
+      .eq("scope_id", scopeId)
+      .not("resolved_at", "is", null),
+    sb
+      .from("funnel_events")
+      .select("meta")
+      .eq("scope_id", scopeId)
+      .eq("event_type", "SCORECARD_VIEW"),
+  ]);
+  if (viewsRes.error) throw viewsRes.error;
+  const resolved = resolvedRes.count ?? 0;
+  const viewed = new Set<string>();
+  for (const r of (viewsRes.data ?? []) as Array<{ meta: { prediction_id?: string } | null }>) {
+    const pid = r.meta?.prediction_id;
+    if (pid) viewed.add(pid);
+  }
+  return {
+    resolved,
+    returned: viewed.size,
+    rate: resolved === 0 ? null : viewed.size / resolved,
+  };
+}
+
 /** Read the scope's funnel events and fold them into the DoD metrics. */
 export async function getFunnelMetrics(
   sb: SupabaseClient,

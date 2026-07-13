@@ -6,6 +6,7 @@ import type { DecisionCard } from "@/lib/onboarding/parse";
 import { MECHANISM_CATEGORIES } from "@/lib/onboarding/parse";
 import type { ReferenceClassPriors } from "@/lib/priors";
 import { LeverCreate } from "@/components/onboarding/LeverCreate";
+import { ShipState } from "@/components/onboarding/ShipState";
 import {
   commitOnboardingPrediction,
   declareOnboardingMetric,
@@ -159,6 +160,8 @@ export function OnboardingFunnel() {
   const [priorsLoading, setPriorsLoading] = useState(false);
 
   const [committed, setCommitted] = useState<Committed | null>(null);
+  // Step 7 — the watched lever ref once the drift watch is armed (ship state).
+  const [shipped, setShipped] = useState<{ ref: string; url: string } | null>(null);
 
   // Funnel instrumentation (C2/#15 DoD). A per-run session key ties this run's
   // events together; landedAt anchors the client-measured time-to-first-type.
@@ -514,7 +517,7 @@ export function OnboardingFunnel() {
         </section>
       )}
 
-      {step === "done" && committed && (
+      {step === "done" && committed && !shipped && (
         <section className="flex flex-col gap-4">
           <h1 className="text-[20px] font-semibold text-[var(--text)]">
             On the record. Causent measures it on {committed.resolutionDate}.
@@ -556,6 +559,10 @@ export function OnboardingFunnel() {
             title={committed.title}
             mechanismSummary={committed.mechanismSummary}
             mechanismCategory={committed.mechanismCategory}
+            onAttributed={(ref, url) => {
+              setShipped({ ref, url });
+              emit("SHIP_STATE", { step: "done" });
+            }}
           />
           <div className="flex items-center gap-3">
             <Link href="/actions" className={primaryBtn}>
@@ -578,6 +585,7 @@ export function OnboardingFunnel() {
                 setCard(null);
                 setDeclared(null);
                 setCommitted(null);
+                setShipped(null);
                 setMagnitude("");
                 setResolutionDate("");
                 setErrors([]);
@@ -588,6 +596,17 @@ export function OnboardingFunnel() {
             </button>
           </div>
         </section>
+      )}
+
+      {step === "done" && committed && shipped && (
+        <ShipState
+          title={committed.title}
+          metricName={committed.metricName}
+          direction={committed.direction}
+          magnitudePct={committed.magnitudePct}
+          resolutionDate={committed.resolutionDate}
+          levers={[{ ref: shipped.ref, url: shipped.url, status: "CREATED" }]}
+        />
       )}
     </div>
   );

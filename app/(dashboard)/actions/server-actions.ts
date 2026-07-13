@@ -17,6 +17,8 @@ import { revalidatePath } from "next/cache";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { getSession } from "@/lib/auth/session";
+import { recordFunnelEvent } from "@/lib/data/funnel";
 import { DEMO_SCOPE_ID, METRIC_CONFIG_BY_SLUG } from "@/lib/data/config";
 import { getPriorsForReferenceClass } from "@/lib/data/priors";
 import type { ReferenceClassPriors } from "@/lib/priors";
@@ -270,4 +272,24 @@ export async function resolveNow(): Promise<ActionResult> {
   }
   revalidatePath("/actions");
   return { ok: true };
+}
+
+/** Resolution-return instrumentation (#18): record that a resolved prediction's
+ *  scorecard was viewed. Prediction-keyed (session_key = sc-<id>, prediction_id
+ *  in meta) so getResolutionReturnRate can dedupe across browser sessions.
+ *  Best-effort — a view is never blocked by instrumentation. */
+export async function recordScorecardView(input: {
+  predictionId: string;
+  verdict: string;
+}): Promise<void> {
+  try {
+    const session = await getSession();
+    await recordFunnelEvent(await getServerSupabase(), session.workspaceId, session.userId, {
+      sessionKey: `sc-${input.predictionId}`,
+      eventType: "SCORECARD_VIEW",
+      meta: { prediction_id: input.predictionId, verdict: input.verdict },
+    });
+  } catch {
+    // Instrumentation is non-critical.
+  }
 }
