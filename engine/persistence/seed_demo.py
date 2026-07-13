@@ -75,6 +75,8 @@ import psycopg
 # (script dir on path) or `python -m persistence.seed_demo` (engine root on path).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from causal.drift import detect_baseline_drift  # noqa: E402
+from causal.types import Series  # noqa: E402
 from persistence.bridge import persist_metric_readouts  # noqa: E402
 from persistence.resolve import resolve_due_predictions  # noqa: E402
 
@@ -122,6 +124,22 @@ M_ARR, M_ACTIVATION, M_CHURN, M_GP, M_SUPPORT = (m[0] for m in METRICS)
 # --- Landmark (confident-capable) ship dates ------------------------------------------
 ARR_STEP_DATE = date(2025, 2, 3)        # PR #8107 -> clean +step on ARR
 ACTIVATION_STEP_DATE = date(2025, 3, 5)  # PR #8256 -> clean +step on Activation
+
+# --- Baseline-drift beat (C5/#18, the demo's hero signal) -----------------------------
+# A SEPARATE metric carries the drift story so it never disturbs the confident-edge
+# and verdict stories on the five core metrics (any level shift on their series would
+# pollute the dense action->metric graph). Its baseline slides 20% -> 12% mid-window,
+# AFTER the prediction was committed and BEFORE any lever shipped — "drift of the
+# world" the builder cannot see. The mapped lever is DETECTED-not-shipped, so the
+# detector's pre-intervention window is the whole post-commit tail (the prospective
+# case), and the prediction never resolves (its date is in the future) so the live
+# notice keeps rendering.
+DRIFT_METRIC = (_metric_uuid(6), "New-User Activation", "csv", "percent")
+M_DRIFT = DRIFT_METRIC[0]
+DRIFT_COMMIT_DATE = date(2025, 2, 15)      # when the +3% prediction was committed
+DRIFT_SHIFT_DATE = date(2025, 4, 5)        # the baseline slides here (post-commit)
+DRIFT_RESOLUTION_DATE = date(2025, 8, 2)   # future vs RESOLVE_TODAY -> stays unresolved
+DRIFT_LEVER_PR = 8455                       # the mapped lever — declared, not yet shipped
 
 
 # --- Series builders ------------------------------------------------------------------
@@ -191,6 +209,14 @@ def _build_series() -> dict[uuid.UUID, list[float]]:
         M_SUPPORT: _organic_series(
             base=11_100.0, drift_per_day=-6.0, noise_frac=0.05,
             nudges=[(date(2025, 5, 13), -1_600.0)], seed=505, floor=0.0,
+        ),
+        # DRIFT beat: flat baseline 20% with ONE clean level slide to 12% at
+        # DRIFT_SHIFT_DATE (a -40% baseline move) + tight IID noise -> the
+        # change-point detector fires with a clean CI. Its only structure is the
+        # slide, so no other window reads as a shift.
+        M_DRIFT: _clean_step_series(
+            base=20.0, drift_per_day=0.0, step=-8.0,
+            step_date=DRIFT_SHIFT_DATE, noise_sd=0.35, seed=606,
         ),
     }
 
@@ -308,7 +334,7 @@ def _seed(conn: psycopg.Connection, series: dict[uuid.UUID, list[float]]) -> Non
             ),
         )
 
-        for metric_id, name, source, unit in METRICS:
+        for metric_id, name, source, unit in [*METRICS, DRIFT_METRIC]:
             cur.execute(
                 "insert into public.metrics (metric_id, scope_id, name, source, granularity, unit) "
                 "values (%s,%s,%s,%s,'daily',%s)",
@@ -340,6 +366,19 @@ def _seed(conn: psycopg.Connection, series: dict[uuid.UUID, list[float]]) -> Non
             "values (%s,%s,'github_pr',%s,null,null,'open',%s)",
             (_action_uuid(upr), SCOPE, f"PR #{upr}",
              json.dumps({"title": utitle, **_rationale(uhyp, "ARR")})),
+        )
+
+        # The drift beat's lever: declared but NOT yet shipped (NULL effective_date),
+        # so drift is searched over the whole post-commit window (prospective case).
+        cur.execute(
+            "insert into public.actions "
+            "(action_id, scope_id, source, external_ref, ship_ts, effective_date, "
+            " status, rationale_richtext) "
+            "values (%s,%s,'github_pr',%s,null,null,'open',%s)",
+            (_action_uuid(DRIFT_LEVER_PR), SCOPE, f"PR #{DRIFT_LEVER_PR}",
+             json.dumps({"title": "New-User Onboarding Redesign",
+                         **_rationale("A rebuilt first-run redesign lifts new-user activation.",
+                                      "New-User Activation")})),
         )
 
 
@@ -409,6 +448,42 @@ def _seed_prospective(conn: psycopg.Connection,
             "values (%s,%s,'POSITIVE',%s,'POSITIVE',%s,%s)",
             (_prediction_uuid(3), act_over_pct * 1.5, act_over_pct,
              "Pilot cohort data suggested the original estimate was too aggressive.",
+             USER),
+        )
+
+        # D7 — the DRIFT beat. A +3% New-User Activation prediction committed on
+        # DRIFT_COMMIT_DATE, its lever (PR #8455) still unshipped, resolution date
+        # in the future so it stays UNRESOLVED (the live notice keeps rendering).
+        # Its metric's baseline slid 20% -> 12% after the commit: the detector fires.
+        drift_rationale = {
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [
+                {"type": "text", "text": "We predict: a rebuilt first-run flow lifts "
+                 "new-user activation by ~3%."}]}],
+            "meta": {"mechanism_category": "activation"},
+        }
+        cur.execute(
+            "insert into public.decisions (decision_id, scope_id, title, rationale, created_by) "
+            "values (%s,%s,%s,%s,%s)",
+            (_decision_uuid(7), SCOPE, "Lift new-user activation with an onboarding redesign",
+             json.dumps(drift_rationale), USER),
+        )
+        cur.execute(
+            "insert into public.decision_actions (decision_id, action_id) values (%s,%s)",
+            (_decision_uuid(7), _action_uuid(DRIFT_LEVER_PR)),
+        )
+        cur.execute(
+            "insert into public.levers (scope_id, decision_id, action_id, metric_id, "
+            "provenance_token, target_source, status) "
+            "values (%s,%s,%s,%s,'causent-seed-d7','github','DETECTED')",
+            (SCOPE, _decision_uuid(7), _action_uuid(DRIFT_LEVER_PR), M_DRIFT),
+        )
+        cur.execute(
+            "insert into public.predictions (prediction_id, scope_id, decision_id, "
+            "metric_id, direction, magnitude_pct_mean, resolution_date, committed_at, "
+            "committed_by) values (%s,%s,%s,%s,'POSITIVE',3.0,%s,%s,%s)",
+            (_prediction_uuid(7), SCOPE, _decision_uuid(7), M_DRIFT,
+             DRIFT_RESOLUTION_DATE, f"{DRIFT_COMMIT_DATE.isoformat()}T12:00:00+00:00",
              USER),
         )
 
@@ -491,9 +566,22 @@ def _verify(conn: psycopg.Connection) -> dict:
         "order by a.effective_date, m.name", (SCOPE,))
     edges = cur.fetchall()
 
+    # DRIFT beat: the seeded baseline slide must actually FIRE the detector, over
+    # the prospective window (commit date -> end, no lever shipped). Exercises the
+    # real engine on the seeded data, so the seed can't silently stop firing.
+    cur.execute(
+        "select obs_date, value from public.metric_observations "
+        "where metric_id = %s order by obs_date", (M_DRIFT,))
+    drift_rows = cur.fetchall()
+    drift_series = Series(
+        np.array([d.toordinal() for d, _ in drift_rows], dtype=np.int64),
+        np.array([float(v) for _, v in drift_rows], dtype=np.float64), 0)
+    drift = detect_baseline_drift(
+        drift_series, DRIFT_COMMIT_DATE.toordinal(), None)
+
     return {"counts": counts, "confident_edges": confident,
             "insufficient_edges": insufficient, "edges": edges,
-            "predictions": predictions}
+            "predictions": predictions, "drift": drift}
 
 
 def main() -> int:
@@ -549,22 +637,31 @@ def main() -> int:
         print(f"  {title:38s} {metric:16s} {direction:9s} {pct:7.2f} "
               f"{verdict or '(unresolved)'}  (due {due})")
 
+    drift = result["drift"]
+    print("\n=== Baseline-drift beat (New-User Activation) ===")
+    if drift.status == "FIRED":
+        print(f"  FIRED — baseline moved {drift.pre_level:.1f}% -> {drift.post_level:.1f}% "
+              f"({drift.pct_change:+.0f}%), CI [{drift.ci_low:.2f}, {drift.ci_high:.2f}]")
+    else:
+        print(f"  {drift.status} — reason {drift.reason}")
+
     verdicts = {v for *_, v, _ in result["predictions"] if v}
     target = {"CONFIRMED", "REFUTED", "DIRECTION_CONFIRMED",
               "INCONCLUSIVE", "GATHERING", "VOIDED"}
 
     ok = (
-        c["metrics"] == 5
-        and c["metric_observations"] == 5 * SERIES_DAYS
-        and c["actions"] == len(ACTIONS) + 1  # + the never-shipped VOIDED lever
+        c["metrics"] == 6                            # + the New-User Activation drift metric
+        and c["metric_observations"] == 6 * SERIES_DAYS
+        and c["actions"] == len(ACTIONS) + 2         # + the VOIDED lever + the drift lever
         and result["confident_edges"] >= 1
         and result["insufficient_edges"] >= 1
         and target <= verdicts
+        and drift.status == "FIRED"                  # the seed must fire the drift detector
     )
-    print("\nRESULT:", "PASS — confident, gathering-data, and all 6 target "
-          "prediction verdicts present"
+    print("\nRESULT:", "PASS — confident, gathering-data, all 6 target verdicts, "
+          "and a firing baseline-drift beat"
           if ok else f"FAIL — required demo invariants not met "
-          f"(verdicts seen: {sorted(verdicts)})")
+          f"(verdicts seen: {sorted(verdicts)}; drift: {drift.status})")
     return 0 if ok else 1
 
 
