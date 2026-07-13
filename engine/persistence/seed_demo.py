@@ -141,6 +141,15 @@ DRIFT_SHIFT_DATE = date(2025, 4, 5)        # the baseline slides here (post-comm
 DRIFT_RESOLUTION_DATE = date(2025, 8, 2)   # future vs RESOLVE_TODAY -> stays unresolved
 DRIFT_LEVER_PR = 8455                       # the mapped lever — declared, not yet shipped
 
+# --- UNMEASURABLE_NO_METRIC exercise (C5/#18) -----------------------------------------
+# A DECLARED metric (source='declared') that never received observations. Its
+# pre-registered prediction is due in the past, so the sweep resolves it — and
+# the verdict machine returns UNMEASURABLE_NO_METRIC (nothing to measure). The
+# scorecard renders the connect/self-report prompt, never a blank or an error.
+DECLARED_METRIC = (_metric_uuid(7), "Beta waitlist signups", "declared", "count")
+M_DECLARED = DECLARED_METRIC[0]
+DECLARED_RESOLUTION_DATE = date(2025, 5, 20)  # past vs RESOLVE_TODAY -> resolves
+
 
 # --- Series builders ------------------------------------------------------------------
 def _clean_step_series(base: float, drift_per_day: float, step: float,
@@ -345,6 +354,15 @@ def _seed(conn: psycopg.Connection, series: dict[uuid.UUID, list[float]]) -> Non
                 [(metric_id, d, round(float(v), 4)) for d, v in zip(DATES, series[metric_id])],
             )
 
+        # Declared metric (C1/#14): name-only, NO observations — the
+        # UNMEASURABLE_NO_METRIC story. Inserted outside the loop above because it
+        # has no series to observe.
+        cur.execute(
+            "insert into public.metrics (metric_id, scope_id, name, source, granularity, unit) "
+            "values (%s,%s,%s,'declared','daily',%s)",
+            (M_DECLARED, SCOPE, DECLARED_METRIC[1], DECLARED_METRIC[3]),
+        )
+
         for pr, title, ship, primary_metric, hypothesis in ACTIONS:
             primary_name = next(m[1] for m in METRICS if m[0] == primary_metric)
             cur.execute(
@@ -485,6 +503,31 @@ def _seed_prospective(conn: psycopg.Connection,
             (_prediction_uuid(7), SCOPE, _decision_uuid(7), M_DRIFT,
              DRIFT_RESOLUTION_DATE, f"{DRIFT_COMMIT_DATE.isoformat()}T12:00:00+00:00",
              USER),
+        )
+
+        # D8 — the UNMEASURABLE_NO_METRIC beat (C5/#18). A prediction committed
+        # against the DECLARED metric (no observations), due in the past so the
+        # sweep resolves it to UNMEASURABLE_NO_METRIC. No lever needed: the
+        # verdict machine short-circuits on the never-wired metric before any ITS.
+        declared_rationale = {
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [
+                {"type": "text", "text": "We predict: a public beta waitlist grows "
+                 "signups — a metric we haven't wired to a source yet."}]}],
+            "meta": {"mechanism_category": "activation"},
+        }
+        cur.execute(
+            "insert into public.decisions (decision_id, scope_id, title, rationale, created_by) "
+            "values (%s,%s,%s,%s,%s)",
+            (_decision_uuid(8), SCOPE, "Open a public beta waitlist",
+             json.dumps(declared_rationale), USER),
+        )
+        cur.execute(
+            "insert into public.predictions (prediction_id, scope_id, decision_id, "
+            "metric_id, direction, magnitude_pct_mean, resolution_date, committed_by) "
+            "values (%s,%s,%s,%s,'POSITIVE',20.0,%s,%s)",
+            (_prediction_uuid(8), SCOPE, _decision_uuid(8), M_DECLARED,
+             DECLARED_RESOLUTION_DATE, USER),
         )
 
 
@@ -647,18 +690,18 @@ def main() -> int:
 
     verdicts = {v for *_, v, _ in result["predictions"] if v}
     target = {"CONFIRMED", "REFUTED", "DIRECTION_CONFIRMED",
-              "INCONCLUSIVE", "GATHERING", "VOIDED"}
+              "INCONCLUSIVE", "GATHERING", "VOIDED", "UNMEASURABLE_NO_METRIC"}
 
     ok = (
-        c["metrics"] == 6                            # + the New-User Activation drift metric
-        and c["metric_observations"] == 6 * SERIES_DAYS
+        c["metrics"] == 7                            # + drift metric + declared (no-obs) metric
+        and c["metric_observations"] == 6 * SERIES_DAYS  # declared metric has NO observations
         and c["actions"] == len(ACTIONS) + 2         # + the VOIDED lever + the drift lever
         and result["confident_edges"] >= 1
         and result["insufficient_edges"] >= 1
         and target <= verdicts
         and drift.status == "FIRED"                  # the seed must fire the drift detector
     )
-    print("\nRESULT:", "PASS — confident, gathering-data, all 6 target verdicts, "
+    print("\nRESULT:", "PASS — confident, gathering-data, all 7 target verdicts, "
           "and a firing baseline-drift beat"
           if ok else f"FAIL — required demo invariants not met "
           f"(verdicts seen: {sorted(verdicts)}; drift: {drift.status})")

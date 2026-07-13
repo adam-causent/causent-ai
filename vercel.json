@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/reconcile-levers",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/resolve",
+      "schedule": "0 6 * * *"
     }
   ]
 }

@@ -1,6 +1,6 @@
 // Capture-flow validation tests (epic #6, #10): no engine prefill (structural),
 // UNATTRIBUTED warning, one-lever invariant, revision-requires-reason, and the
-// 8-state verdict presentation map.
+// 9-state verdict presentation map (UNMEASURABLE_NO_METRIC added in C5/#18).
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -74,8 +74,8 @@ describe("validateRevision — a revision is data, not a failure", () => {
 });
 
 describe("verdict presentation map", () => {
-  it("covers all 8 verdicts with label, caveat, glyph, and tone", () => {
-    assert.equal(ALL_VERDICTS.length, 8);
+  it("covers all 9 verdicts with label, caveat, glyph, and tone", () => {
+    assert.equal(ALL_VERDICTS.length, 9);
     for (const v of ALL_VERDICTS) {
       const p = VERDICT_PRESENTATION[v];
       assert.equal(p.verdict, v);
