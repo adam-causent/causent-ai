@@ -32,7 +32,16 @@ export function createGitHubPoller(token: string, fetchImpl: typeof fetch = fetc
           "x-github-api-version": "2022-11-28",
         },
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        // Loud, not silent: an expired/revoked PAT (401/403) or rate-limit (429)
+        // degrades the poller to a no-op. Without this, drift detection — the
+        // retention mechanism — stops while the hourly cron keeps returning 200.
+        console.error(
+          `[github-poll] search failed (${res.status} ${res.statusText}) for repo=${repo}; ` +
+            `treating as no-match. If this persists, the GITHUB_TOKEN is likely expired/revoked.`,
+        );
+        return null;
+      }
       const body = (await res.json()) as {
         items?: Array<{ number?: number; html_url?: string }>;
       };

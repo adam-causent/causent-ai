@@ -22,8 +22,12 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-/** Path prefixes that are public — never redirected to /login. */
-const PUBLIC_PREFIXES = ["/login", "/auth", "/api"];
+/** Path prefixes that are public — never redirected to /login. NOTE: /api is
+ *  deliberately NOT here. The unauthenticated api routes (webhooks + cron) are
+ *  already excluded by the matcher below, so they never reach proxy() at all;
+ *  any OTHER /api route is therefore guard-by-default (an app-data route added
+ *  under /api gets a session check unless it's explicitly excluded). */
+const PUBLIC_PREFIXES = ["/login", "/auth"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(

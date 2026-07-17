@@ -31,11 +31,24 @@ export async function GET(request: Request): Promise<NextResponse> {
   const poller = token ? createGitHubPoller(token) : nullPoller;
   const timeoutDays = Number(process.env.CAUSENT_LEVER_TIMEOUT_DAYS) || undefined;
 
+  // Loud degradation: with no PAT the poller is a no-op and only the timeout
+  // sweep runs — drift detection silently stops. Log it, and surface it in the
+  // response so a plain `curl` of the cron tells the truth (not a green 200).
+  if (!token) {
+    console.warn(
+      "[reconcile-levers] GITHUB_TOKEN absent — live poll DISABLED, timeout sweep only. " +
+        "Drift detection is degraded until a PAT is configured.",
+    );
+  }
+
   const out = await reconcileLevers(getServiceRoleSupabase(), poller, {
     scopeId: DEMO_SCOPE_ID,
     now: new Date(),
     timeoutDays,
   });
   if (!out.ok) return NextResponse.json({ error: out.error }, { status: 500 });
-  return NextResponse.json({ ...out.result, live_poll: Boolean(token) }, { status: 200 });
+  return NextResponse.json(
+    { ...out.result, live_poll: Boolean(token), poller: token ? "live" : "disabled" },
+    { status: 200 },
+  );
 }

@@ -3,6 +3,14 @@
 // guard), protected by CRON_SECRET exactly like reconcile-levers: Vercel Cron
 // sends `Authorization: Bearer <CRON_SECRET>`.
 //
+// SCHEDULE (vercel.json): "0 15 * * *". Vercel crons are UTC ONLY — no local
+// time, no DST. 15:00 UTC = 8am PDT (7am PST), so the daily resolve fires before
+// a partner's morning rather than at 11pm the night before (which "0 6 * * *"
+// actually meant). resolution_date comparisons in the runner are UTC too; keep
+// the runner compares against date.today() (server-local, = UTC on Vercel's
+// runtime), so it aligns with the UTC cron — but a non-UTC host would drift the
+// boundary and yield off-by-one resolutions.
+//
 // It shells out to the SAME runner the "Resolve now" dev affordance uses
 // (engine/persistence/run_resolution.py) — the verdict machine lives in the
 // engine; this adapter only picks the interpreter, cwd, and the demo "today"
