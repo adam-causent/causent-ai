@@ -1,6 +1,6 @@
 # Causent — Build Status & Resume Guide
 
-Last updated: 2026-07-16. Single source of truth for "where are we and how do I pick up."
+Last updated: 2026-07-18. Single source of truth for "where are we and how do I pick up."
 Product: **dual cold-start on one causal graph** — the retrospective wedge ("Did-It-Ship,
 Did-It-Work": tie each shipped action to a metric, honest ITS readout) PLUS the prospective
 on-ramp (human pre-registered prediction → drift watch → engine-measured resolution). See
@@ -55,10 +55,16 @@ that conversation, not code, is the critical path.** Remaining credential: a Git
            (git-connected, auto-deploys main), invite-only Google OAuth ARMED (allowlist
            hook + owner invited), cloud Supabase seeded via seed_demo.py — all 7 verdicts
            + drift beat live; Google OAuth + GitHub App + fine-grained PAT all configured
+↻ RESOLVE  resolution PORTED to a serverless fn (PR #24, OPEN): api/resolve.py stateful
+           sibling of the engine fn + cron rewired to HTTP-call it; verified against a
+           seeded local DB. Deploy `causent-resolve` + set CAUSENT_RESOLVE_URL to go live
+↻ JIRA     #19 Jira parity + write-scope auto-create for both trackers (PR #25, OPEN,
+           closes #19): read-only deep-link + scan-detect + canonical map + webhook +
+           write-scope issue-property/label create; 27 tests + 334 lib green, no migration
 ☐ PARTNER  zero-code mechanism-mapping test  ← gates T2 connector completion + #18 drift-alert surface
 ☐ CONNECT  SUPABASE_SERVICE_ROLE_KEY deliberately withheld from Vercel → webhook auto-detect
            + reconcile cron return 500 (paste-URL attribution works; deliberate, reversible)
-☐ OPEN     #16 connector live · #18 drift-alert surface (gated) · #19 Jira parity
+☐ OPEN     #16 connector live (creds) · #18 drift-alert surface (gated) · ~~#19 Jira parity~~ (PR #25)
 ```
 
 ## What's built (all on `main`, verified against live evidence)
@@ -304,10 +310,11 @@ tabs. Structure (as-built lives at repo root, NOT `/src`):
   Google provider + Before-User-Created hook (`enforce_allowlist`) + `scripts/invite.ts`
   (service key inline-only). Data API rejects key-only anonymous requests (401) while
   session-authenticated RLS reads work — stricter than default, keep it.
-- **Known prod limits**: the resolve cron + drift detector spawn local Python — the engine is
-  excluded from the app deploy, so on Vercel they no-op/error; run
-  `engine/persistence/run_resolution.py` locally against the cloud DB (porting resolution to
-  the deployed engine fn is the follow-up). `/login` is publicly reachable and currently
+- **Known prod limits**: ~~the resolve cron spawns local Python~~ — **RESOLVED by PR #24
+  (OPEN)**: resolution is ported to its own serverless fn (`api/resolve.py` → project
+  `causent-resolve`) and the cron HTTP-calls it; deploy + set `CAUSENT_RESOLVE_URL` to arm
+  it (steps in `api/DEPLOY.md`). The drift detector still spawns local Python (same pattern,
+  not yet ported). `/login` is publicly reachable and currently
   indexable (no robots.txt — the proxy redirects it; CT logs make the hostname discoverable);
   add `app/robots.ts` + proxy exclusion if stealth matters.
 
@@ -322,6 +329,14 @@ tabs. Structure (as-built lives at repo root, NOT `/src`):
 - ~~**~45-min console setup**~~ — **DONE 2026-07-15/16** (Google OAuth + GitHub App + PAT +
   deploy; see "Production deployment" above). To arm connector automation: add
   `SUPABASE_SERVICE_ROLE_KEY` to Vercel prod + redeploy.
+
+**Overnight run 8 (2026-07-18) — two PRs OPEN, awaiting review** (`docs/OVERNIGHT_REPORT_8.md`):
+- **PR #24 resolution port** — `api/resolve.py` (stateful sibling of the engine fn) + cron
+  rewired to HTTP-call it; makes the daily sweep actually run in prod. Verified vs a seeded
+  local DB. Go-live: `scripts/deploy-resolve.sh --prod` + `CAUSENT_RESOLVE_URL`/secret.
+- **PR #25 Jira parity (closes #19)** — Jira read-only + write-scope auto-create for both
+  trackers; 27 new tests, 334 lib green, no migration. Go-live: Jira webhook + basic-auth
+  token (`JIRA_*`) / `GITHUB_WRITE_TOKEN`; read-only deep-link works without them.
 
 The four items above (UI↔Supabase, ingestion, engine deploy, summary layer) are now **BUILT
 and verified locally** on `overnight/wire-up`. What remains:
