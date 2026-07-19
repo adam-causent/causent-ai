@@ -27,10 +27,27 @@ import {
 import { getPriorsForReferenceClass } from "@/lib/data/priors";
 import type { ReferenceClassPriors } from "@/lib/priors";
 import { recordFunnelEvent, type RecordFunnelEventInput } from "@/lib/data/funnel";
-import { draftLeverFromDecision } from "@/lib/levers/draft";
+import { draftLeverFromDecision, type TargetSource } from "@/lib/levers/draft";
 import { detectLever, markLeverCreated, parseIssueUrl } from "@/lib/levers/detect";
+import { autoCreateLever } from "@/lib/levers/autocreate";
 import { draftTicketCopy } from "@/lib/levers/llm";
 import { issueExternalRef } from "@/lib/connectors/github";
+import { jiraIssueExternalRef, parseJiraIssueUrl } from "@/lib/connectors/jira";
+import {
+  createGitHubWriteTransport,
+  createJiraWriteTransport,
+  gitHubIssueCreator,
+  jiraIssueCreator,
+  type IssueCreator,
+} from "@/lib/connectors/write";
+
+/** The Jira target params the read-only deep-link + write-scope create need. */
+type JiraTarget = {
+  projectKey: string;
+  baseUrl?: string;
+  projectId?: string;
+  issueTypeId?: string;
+};
 
 /** Funnel instrumentation (C2/#15 DoD). Best-effort by contract: an insert
  *  failure must never break the funnel, so this swallows errors and always
@@ -96,12 +113,16 @@ export async function commitOnboardingPrediction(
 export async function draftLeverForDecision(input: {
   decisionId: string;
   metricId: string;
-  repo: string;
+  /** GitHub watch target "owner/repo" (when targetSource is github). */
+  repo?: string;
+  /** Jira target (when targetSource is jira). */
+  jira?: JiraTarget;
+  targetSource?: TargetSource;
   title: string;
   mechanismSummary: string;
   mechanismCategory?: string | null;
 }): Promise<
-  | { ok: true; deepLink: string; token: string; reused: boolean }
+  | { ok: true; deepLink: string | null; token: string; reused: boolean }
   | { ok: false; error: string }
 > {
   const session = await getSession();
@@ -113,7 +134,9 @@ export async function draftLeverForDecision(input: {
   const res = await draftLeverFromDecision(await getServerSupabase(), session.workspaceId, {
     decisionId: input.decisionId,
     metricId: input.metricId,
+    targetSource: input.targetSource ?? "github",
     repo: input.repo,
+    jira: input.jira,
     title: copy.title,
     body: copy.body,
   });
@@ -122,9 +145,99 @@ export async function draftLeverForDecision(input: {
   return { ok: true, deepLink: res.deepLink, token: res.token, reused: res.reused };
 }
 
+/** Step 6 write-scope EFFICIENT path (#19): with a write-scoped credential
+ *  configured, Causent drafts AND creates the lever ticket itself and attributes
+ *  the prediction in one shot — zero user clicks. Falls back with
+ *  `writeUnavailable` when no write credential is set, so the UI can offer the
+ *  read-only deep-link instead. Idempotent (never creates a duplicate ticket). */
+export async function autoCreateLeverForDecision(input: {
+  decisionId: string;
+  metricId: string;
+  repo?: string;
+  jira?: JiraTarget;
+  targetSource?: TargetSource;
+  title: string;
+  mechanismSummary: string;
+  mechanismCategory?: string | null;
+}): Promise<
+  | { ok: true; externalRef: string; url: string; strategy: string; alreadyCreated: boolean }
+  | { ok: false; error: string; writeUnavailable?: boolean }
+> {
+  const targetSource = input.targetSource ?? "github";
+  const creator = writeCreatorFromEnv(targetSource, input.repo, input.jira);
+  if (!creator) {
+    return {
+      ok: false,
+      writeUnavailable: true,
+      error:
+        targetSource === "github"
+          ? "No GitHub write credential configured — use the one-click create link instead."
+          : "No Jira write credential configured — use the one-click create link instead.",
+    };
+  }
+  const session = await getSession();
+  const copy = await draftTicketCopy({
+    title: input.title,
+    mechanismSummary: input.mechanismSummary,
+    mechanismCategory: input.mechanismCategory ?? null,
+  });
+  const res = await autoCreateLever(
+    await getServerSupabase(),
+    session.workspaceId,
+    {
+      decisionId: input.decisionId,
+      metricId: input.metricId,
+      targetSource,
+      repo: input.repo,
+      jira: input.jira,
+      title: copy.title,
+      body: copy.body,
+    },
+    creator,
+  );
+  if (!res.ok) return { ok: false, error: res.error };
+  revalidatePath("/actions");
+  return {
+    ok: true,
+    externalRef: res.externalRef,
+    url: res.url,
+    strategy: res.strategy,
+    alreadyCreated: res.alreadyCreated,
+  };
+}
+
+/** Build a live write creator from env, or null when no write credential is set.
+ *  GitHub: GITHUB_WRITE_TOKEN (else GITHUB_TOKEN). Jira: JIRA_BASE_URL + JIRA_EMAIL
+ *  + JIRA_API_TOKEN (basic-auth v1). This is the "write scope granted" signal. */
+function writeCreatorFromEnv(
+  targetSource: TargetSource,
+  repo: string | undefined,
+  jira: JiraTarget | undefined,
+): IssueCreator | null {
+  if (targetSource === "github") {
+    const token = process.env.GITHUB_WRITE_TOKEN ?? process.env.GITHUB_TOKEN;
+    const parts = repo?.trim().split("/");
+    if (!token || !parts || parts.length !== 2) return null;
+    return gitHubIssueCreator(createGitHubWriteTransport(token), {
+      owner: parts[0],
+      repo: parts[1],
+    });
+  }
+  const baseUrl = process.env.JIRA_BASE_URL;
+  const email = process.env.JIRA_EMAIL;
+  const apiToken = process.env.JIRA_API_TOKEN;
+  if (!baseUrl || !email || !apiToken || !jira?.projectKey || !jira.issueTypeId) return null;
+  return jiraIssueCreator(createJiraWriteTransport({ email, apiToken }), {
+    baseUrl,
+    projectKey: jira.projectKey,
+    issueTypeId: jira.issueTypeId,
+  });
+}
+
 /** Step 6 paste-URL fallback: the user created the issue and pastes its URL.
  *  Marks the lever CREATED then detects it (same detector the webhook uses) —
- *  attributing the prediction with no GitHub credentials at all. */
+ *  attributing the prediction with no tracker credentials at all. Handles both
+ *  a GitHub issue URL and a Jira /browse/KEY-n URL. */
 export async function attributeLeverByUrl(input: {
   token: string;
   url: string;
@@ -132,18 +245,23 @@ export async function attributeLeverByUrl(input: {
   | { ok: true; attributed: boolean; externalRef: string }
   | { ok: false; error: string }
 > {
-  const parsed = parseIssueUrl(input.url);
-  if (!parsed) {
-    return { ok: false, error: "That doesn’t look like a GitHub issue URL (…/issues/123)." };
+  const url = input.url.trim();
+  const gh = parseIssueUrl(url);
+  const jira = gh ? null : parseJiraIssueUrl(url);
+  const externalRef = gh
+    ? issueExternalRef(gh.number)
+    : jira
+      ? jiraIssueExternalRef(jira.key)
+      : null;
+  if (!externalRef) {
+    return {
+      ok: false,
+      error: "That doesn’t look like a GitHub (…/issues/123) or Jira (…/browse/ABC-123) issue URL.",
+    };
   }
   const sb = await getServerSupabase();
   await markLeverCreated(sb, input.token);
-  const externalRef = issueExternalRef(parsed.number);
-  const det = await detectLever(sb, {
-    token: input.token,
-    externalRef,
-    htmlUrl: input.url.trim(),
-  });
+  const det = await detectLever(sb, { token: input.token, externalRef, htmlUrl: url });
   if (!det.ok) {
     return { ok: false, error: "No draft lever matched — draft the ticket first." };
   }
