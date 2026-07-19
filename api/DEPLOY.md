@@ -85,3 +85,78 @@ excludes `api/` + `engine/`, and the root `vercel.json` carries no function conf
 ```
 cd engine && CAUSENT_ENGINE_SECRET=dev .venv/bin/python -m pytest tests/test_engine_function.py -q
 ```
+
+---
+
+# Deploying the resolution function (`api/resolve.py`)
+
+The **stateful sibling** of the engine function. It runs the resolution sweep —
+`persistence/resolve.py::resolve_due_predictions` — over HTTP so the app's
+`/api/cron/resolve` route works in a serverless runtime (Vercel's Node runtime has
+no Python venv, so it can't `spawn` the runner in prod). The verdict machine is
+**not** re-implemented here; this is a thin HTTP wrapper over the exact code path
+`run_resolution.py` and the pytest DB suite already exercise.
+
+Unlike the engine function it **holds one credential** — a Postgres DSN it connects
+**RLS-scoped** through (`SET ROLE authenticated` + a `request.jwt.claims` sub, the
+same contract as `run_resolution.py`). It is therefore its **own** Vercel project
+(`causent-resolve`), never folded into the credential-free engine.
+
+## What ships
+
+| File | Role |
+| --- | --- |
+| `api/resolve.py` | The function. `handler` is the Vercel entrypoint; `handle_request(raw_body, secret, *, sweep=...)` is the pure, testable core (the `sweep` seam is injected so guard tests need no DB). |
+| `engine/persistence/**`, `engine/causal/**` | The bridge + verdict machine + numpy engine, bundled via `vercel.json` → `includeFiles`. |
+| `psycopg[binary]` + `numpy` | Runtime deps (generated into the staged `requirements.txt`/`pyproject.toml` by the deploy script). |
+
+## Request contract
+
+`POST /api/resolve` with header `x-causent-resolve-secret: <shared secret>` and an
+optional JSON body:
+
+```json
+{ "today": "2025-05-23", "scope_id": "<uuid>", "user_id": "<uuid>" }
+```
+
+All fields optional. Empty body → resolve today's due predictions for the default
+demo scope (env `CAUSENT_RESOLVE_SCOPE` / `CAUSENT_RESOLVE_USER`, seeded demo
+owner). `today` overrides the boundary (the seeded demo lives in the past).
+
+Response `200`: `{ "ok": true, "processed": N, "total": M, "by_verdict": {...},
+"results": [{prediction_id, status, verdict, detail}], "truncated": bool }`.
+Guards: `401` (missing/wrong/unset secret), `413` (body cap), `400` (bad JSON /
+date / uuid), `500` (a genuine DB/driver fault — type name only, no message leaked),
+`405` (non-POST).
+
+## Deploy steps (project `causent-resolve`) — NOT YET DEPLOYED
+
+1. **Deploy** (stages `api/resolve.py` + `engine/**` + a minimal `vercel.json` +
+   `pyproject.toml`, links project `causent-resolve`, deploys):
+   ```
+   scripts/deploy-resolve.sh          # preview (SSO-walled, like the engine)
+   scripts/deploy-resolve.sh --prod   # production -> https://causent-resolve.vercel.app
+   ```
+2. **Secrets on `causent-resolve`** (production + preview):
+   - `CAUSENT_RESOLVE_SECRET` — the shared secret the app's cron sends (`openssl rand -hex 32`).
+   - `DATABASE_URL` — the Supabase **session-pooler** DSN (user `postgres.<ref>`; put
+     the password in the DSN or a `PG*` env, never in git). This is the one credential.
+   - Optional `CAUSENT_RESOLVE_SCOPE` / `CAUSENT_RESOLVE_USER` to point the default
+     sweep at a non-demo scope + acting owner.
+3. **Wire the app** (`causent-ai` project): set `CAUSENT_RESOLVE_URL` =
+   `https://causent-resolve.vercel.app/api/resolve` and the SAME
+   `CAUSENT_RESOLVE_SECRET`. With both set, `/api/cron/resolve` POSTs the function;
+   without them it falls back to the local runner (dev only) and degrades loudly.
+4. **Smoke-test**:
+   ```
+   curl -s -X POST https://causent-resolve.vercel.app/api/resolve \
+     -H "x-causent-resolve-secret: $CAUSENT_RESOLVE_SECRET" \
+     -H "content-type: application/json" -d '{"today":"2025-05-23"}'
+   ```
+   Expect `200` with `by_verdict`; a wrong/absent secret must return `401`.
+
+## Local verification (no creds needed)
+
+```
+cd engine && .venv/bin/python -m pytest tests/test_resolve_function.py -q
+```
