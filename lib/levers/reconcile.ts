@@ -30,6 +30,7 @@ type OpenLever = {
   lever_id: string;
   provenance_token: string;
   target_ref: string | null;
+  target_source: string | null;
 };
 
 export type ReconcileResult = {
@@ -50,7 +51,7 @@ export async function reconcileLevers(
 ): Promise<{ ok: true; result: ReconcileResult } | { ok: false; error: string }> {
   const openRes = await sb
     .from("levers")
-    .select("lever_id, provenance_token, target_ref")
+    .select("lever_id, provenance_token, target_ref, target_source")
     .eq("scope_id", opts.scopeId)
     .in("status", ["DRAFTED", "CREATED"]);
   if (openRes.error) return { ok: false, error: openRes.error.message };
@@ -58,6 +59,10 @@ export async function reconcileLevers(
 
   const detected: string[] = [];
   for (const lever of open) {
+    // The live poll here understands GitHub only; a Jira lever is detected via
+    // its webhook + the paste fallback (a Jira live-poll backstop is a follow-up).
+    // The timeout sweep below is tracker-agnostic and still covers Jira drafts.
+    if (lever.target_source && lever.target_source !== "github") continue;
     if (!lever.target_ref || !decisionIdFromToken(lever.provenance_token)) continue;
     let hit: PolledIssue | null = null;
     try {
