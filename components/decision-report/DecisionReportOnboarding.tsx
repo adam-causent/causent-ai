@@ -1,22 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { DecisionReportEditor } from "@/components/decision-report/DecisionReportEditor";
+import {
+  generateDecisionReportAction,
+  type GenerateDecisionReportActionResult,
+} from "@/app/(onboarding)/onboarding/decision-report-actions";
 import { GUMMY_ALPHA_GOLDEN_EXAMPLE } from "@/lib/decision-reports/fixtures/gummy-alpha";
+
+type GeneratedReport = Extract<
+  GenerateDecisionReportActionResult,
+  { ok: true }
+>["generation"];
 
 export function DecisionReportOnboarding() {
   const [prompt, setPrompt] = useState(GUMMY_ALPHA_GOLDEN_EXAMPLE.initialPrompt);
-  const [generated, setGenerated] = useState(false);
+  const [generated, setGenerated] = useState<GeneratedReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  function generateReport() {
+    setError(null);
+    startTransition(async () => {
+      const result = await generateDecisionReportAction(prompt);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setGenerated(result.generation);
+    });
+  }
 
   if (generated) {
     return (
       <div id="report-top">
         <DecisionReportEditor
-          initialReport={GUMMY_ALPHA_GOLDEN_EXAMPLE.report}
-          projection={GUMMY_ALPHA_GOLDEN_EXAMPLE.metricProjection}
-          workspaceName={GUMMY_ALPHA_GOLDEN_EXAMPLE.workspaceName}
-          projectName={GUMMY_ALPHA_GOLDEN_EXAMPLE.projectName}
-          onStartOver={() => setGenerated(false)}
+          initialReport={generated.report}
+          projection={generated.metricProjection}
+          workspaceName={generated.workspaceName}
+          projectName={generated.projectName}
+          generationMeta={{
+            mode: generated.mode,
+            warning: generated.warning,
+            latencyMs: generated.telemetry.latencyMs,
+            totalTokens: generated.telemetry.totalTokens,
+          }}
+          onStartOver={() => setGenerated(null)}
         />
       </div>
     );
@@ -52,17 +81,22 @@ export function DecisionReportOnboarding() {
         />
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
           <p className="max-w-md text-[11px] leading-5 text-[var(--text-muted)]">
-            Golden-example mode uses a deterministic report so we can evaluate the experience before connecting a model.
+            Causent labels supplied facts, AI inferences, suggestions, and missing information separately. It will not invent owners, costs, or metric values.
           </p>
           <button
             type="button"
             className="rounded-lg bg-[var(--text)] px-5 py-2.5 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={prompt.trim().length < 20}
-            onClick={() => setGenerated(true)}
+            disabled={prompt.trim().length < 20 || isPending}
+            onClick={generateReport}
           >
-            Generate Decision Report
+            {isPending ? "Generating report…" : "Generate Decision Report"}
           </button>
         </div>
+        {error ? (
+          <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800" role="alert">
+            {error}
+          </p>
+        ) : null}
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-3">

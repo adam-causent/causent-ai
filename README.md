@@ -23,7 +23,7 @@ The application lives at the repository root rather than under `src/`.
 
 ## Product surfaces
 
-- `/onboarding` — AI-assisted Decision Report onboarding; Slice 1 currently uses the deterministic Gummy Alpha golden fixture
+- `/onboarding` — AI-assisted Decision Report onboarding with bounded live generation, verified provenance, and a safe editable fallback
 - `/reports` — saved reports and future Decision Report home
 - `/actions` — decisions, predictions, actions, levers, drift, and scorecards
 - `/data-workshop` — metric connection and CSV input
@@ -44,7 +44,9 @@ To review the Decision Report prototype without authentication:
 CAUSENT_LOCAL_DEMO=1 npm run dev
 ```
 
-Open `http://localhost:3000/onboarding`, select **Generate Decision Report**, and edit any report field. Slice 1 intentionally uses deterministic fixture generation; live model generation arrives in Slice 2.
+Open `http://localhost:3000/onboarding`, select **Generate Decision Report**, and edit any report field. Slice 2 uses the Vercel AI Gateway through the core AI SDK. Authenticate locally with `VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`; override the default `anthropic/claude-sonnet-5` model with `CAUSENT_DECISION_REPORT_MODEL`. Set `CAUSENT_DECISION_REPORT_FIXTURE=1` to make the exact Gummy Alpha prompt deterministic.
+
+The model supplies untrusted content and exact evidence excerpts, never trusted IDs. The server assigns IDs, verifies evidence against the brief, and leaves owners, costs, customers, stakeholders, governance, and metric values blank unless supplied. Provider failures preserve the brief in a safe editable fallback rather than dead-ending onboarding.
 
 Before changing Next.js behavior, read the relevant bundled guide under `node_modules/next/dist/docs/`; this repository uses Next.js 16 conventions that may differ from older App Router documentation.
 

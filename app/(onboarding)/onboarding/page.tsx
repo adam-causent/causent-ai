@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { DecisionReportOnboarding } from "@/components/decision-report/DecisionReportOnboarding";
 
-// Slice 1 of the AI-assisted onboarding: one deterministic brief generates an
-// editable, three-section Decision Report. Model calls and persistence remain
-// deliberately outside this route until the report experience is validated.
+// Slice 2 of the AI-assisted onboarding: one bounded brief generates an
+// editable, three-section Decision Report through a server-only model seam.
+// Persistence remains deliberately outside this route until the report
+// experience is validated with a partner.
 
 export const metadata: Metadata = {
   title: "Causent — Build a Decision Report",

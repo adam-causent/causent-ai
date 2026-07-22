@@ -1,8 +1,19 @@
 import type { MetricProjection } from "@/lib/decision-reports/schema";
 
 export function MetricPredictionChart({ projection }: { projection: MetricProjection }) {
-  const delta = projection.predictedPct - projection.baselinePct;
-  const max = Math.max(100, projection.baselinePct, projection.predictedPct);
+  const baselinePct = projection.baselinePct;
+  const predictedPct = projection.predictedPct;
+  const hasBaseline = baselinePct !== null;
+  const hasPrediction = predictedPct !== null;
+  const hasBoth = hasBaseline && hasPrediction;
+  const delta = hasBoth ? predictedPct - baselinePct : null;
+  const max = Math.max(100, baselinePct ?? 0, predictedPct ?? 0);
+  const evidenceLabel =
+    projection.evidenceState === "illustrative_assumption"
+      ? "Illustrative—not observed"
+      : projection.evidenceState === "prompt_supplied"
+        ? "Values supplied in brief"
+        : "Metric data needed";
 
   return (
     <figure className="rounded-xl border border-[var(--border)] bg-slate-50 p-3">
@@ -17,31 +28,47 @@ export function MetricPredictionChart({ projection }: { projection: MetricProjec
           <p className="mt-1 text-[11px] text-[var(--text-muted)]">{projection.definition}</p>
         </div>
         <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-800">
-          Illustrative—not observed
+          {evidenceLabel}
         </span>
       </div>
 
-      <div className="mt-4 flex flex-col gap-3">
-        <MetricBar
-          label={projection.baselineLabel}
-          value={projection.baselinePct}
-          max={max}
-          color="var(--text-muted)"
-        />
-        <MetricBar
-          label={projection.predictionLabel}
-          value={projection.predictedPct}
-          max={max}
-          color="var(--brand-teal)"
-        />
-      </div>
+      {hasBaseline || hasPrediction ? (
+        <div className="mt-4 flex flex-col gap-3">
+          {hasBaseline ? (
+            <MetricBar
+              label={projection.baselineLabel}
+              value={baselinePct}
+              max={max}
+              color="var(--text-muted)"
+            />
+          ) : null}
+          {hasPrediction ? (
+            <MetricBar
+              label={projection.predictionLabel}
+              value={predictedPct}
+              max={max}
+              color="var(--brand-teal)"
+            />
+          ) : null}
+        </div>
+      ) : (
+        <div className="mt-4 rounded-lg border border-dashed border-amber-300 bg-white/70 px-3 py-4 text-[12px] leading-5 text-[var(--text-muted)]">
+          Add a baseline in Data Workshop and confirm a human prediction before approving this decision.
+        </div>
+      )}
 
       <figcaption className="mt-4 flex items-start gap-3 border-t border-[var(--border)] pt-3">
-        <span className="rounded bg-teal-50 px-2 py-1 text-[13px] font-semibold tabular-nums text-[var(--pos)]">
-          +{delta}pp
-        </span>
+        {delta !== null ? (
+          <span className="rounded bg-teal-50 px-2 py-1 text-[13px] font-semibold tabular-nums text-[var(--pos)]">
+            {delta >= 0 ? "+" : ""}{delta}pp
+          </span>
+        ) : null}
         <p className="text-[11px] leading-5 text-[var(--text-muted)]">
-          Founder prediction for the prototype. Replace both values with instrumented data before using this report to approve the decision.
+          {projection.evidenceState === "illustrative_assumption"
+            ? "Founder prediction for the prototype. Replace both values with instrumented data before using this report to approve the decision."
+            : projection.evidenceState === "prompt_supplied"
+              ? "These values came from the brief. Confirm the baseline against instrumented data before approving the decision."
+              : "The AI can propose a metric definition, but it cannot invent observations or a prediction."}
         </p>
       </figcaption>
     </figure>

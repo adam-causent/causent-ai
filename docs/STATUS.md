@@ -17,8 +17,9 @@ metric relationship, and selected actions. Approved design:
 
 ## TL;DR
 
-**Both existing loops are on `main`; Decision Report Slice 1 is implemented on
-`codex/ai-decision-report`, and Slice 2 live generation is the active build.**
+**Both existing loops are on `main`; Decision Report Slices 1 and 2 are implemented on
+`codex/ai-decision-report`. Slice 2 needs one network-enabled live evaluation before it is
+declared complete; report persistence and materialization remain unbuilt.**
 The retrospective loop closed 2026-07-08 (PR #1) and the
 **prospective Foundations tranche landed 2026-07-12 (PR #12, epic #6, children #7–#11
 all closed, cloud CI green)**: intent-layer schema (`decisions`/`decision_actions(is_lever)`/
@@ -85,7 +86,8 @@ delivery, or production automation.
            + reconcile cron return 500 (paste-URL attribution works; deliberate, reversible)
 ☐ OPEN     #16 connector live (creds) · #18 drift-alert surface (gated) · ~~#19 Jira parity~~ (PR #25)
 ◐ ACTIVE   AI-assisted Decision Report partner wedge: Slice 1 interaction prototype complete;
-           Slice 2 bounded live generation is next. Persistence/materialization remain unbuilt.
+           Slice 2 bounded generation, trust mapping, safe fallback, and tests implemented.
+           Live Gateway evaluation remains; persistence/materialization are unbuilt.
 ```
 
 ## What's built (all on `main`, verified against live evidence)
@@ -341,13 +343,14 @@ tabs. Structure (as-built lives at repo root, NOT `/src`):
 
 ## Next (priority order)
 
-### 1. Build Slice 2 live generation
+### 1. Complete the Slice 2 live evaluation
 
-- Add an untrusted model-output DTO with no client/model-supplied trusted IDs.
-- Generate the three report sections from bounded prompt text and validate every response.
-- Assign claim/action IDs server-side and preserve honest source states.
-- Fall back to the editable Gummy Alpha fixture after timeout, refusal, or malformed output.
-- Measure latency and token usage against the golden prompt.
+- The untrusted model DTO, bounded generation, runtime validation, server-assigned IDs,
+  evidence-quote verification, sensitive-field rejection, retry/timeout policy, and safe
+  editable fallback are implemented and tested.
+- Run the Gummy Alpha prompt once in a network-enabled environment and record the latency and
+  token telemetry already returned by the generation seam. Local outbound DNS was unavailable
+  during the 2026-07-21 implementation pass.
 
 ### 2. Finish the partner wedge
 
@@ -357,7 +360,7 @@ tabs. Structure (as-built lives at repo root, NOT `/src`):
 - One final materialization step into decisions, predictions, metrics, and actions.
 - Feature-flagged rollout with legacy onboarding as rollback.
 
-Slice 1 delivered the first interactive report. Remaining target: end-to-end partner flow in
+Slices 1 and 2 delivered the interactive report and bounded generation seam. Remaining target: end-to-end partner flow in
 roughly 2–3 weeks; stabilized wedge in 3–5 weeks at 15–25 focused hours/week.
 
 ### 3. Validate before production expansion

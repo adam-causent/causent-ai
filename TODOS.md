@@ -16,12 +16,13 @@ Approved design: `docs/designs/ai-assisted-decision-report.md`.
 
 ### Slice 2 — live report generation
 
-- Define a model-output DTO that contains content and source references but no trusted claim or action IDs.
-- Generate and validate the three prescribed sections from arbitrary bounded prompt text.
-- Assign immutable claim/action IDs server-side and map source references only to supplied input chunks.
-- Preserve the deterministic Gummy Alpha fixture as a development mode and provider-failure fallback.
-- Add timeout, refusal, malformed-output, unsupported-claim, and retry-once tests.
-- Measure generation latency and token usage against the Gummy Alpha prompt.
+- [x] Define a model-output DTO that contains content and evidence excerpts but no trusted claim or action IDs.
+- [x] Generate and validate the three prescribed sections from arbitrary bounded prompt text through a server-only Vercel AI Gateway seam.
+- [x] Assign immutable claim/action IDs server-side and accept a sourced claim only when its evidence excerpt matches the supplied prompt.
+- [x] Reject unsupported numeric claims and leave owners, customers, stakeholders, costs, governance, and metric values missing unless sourced.
+- [x] Preserve the deterministic Gummy Alpha fixture as an explicit development mode and provider-failure fallback; preserve arbitrary briefs in a safe partial fallback.
+- [x] Add timeout, refusal, malformed-output, unsupported-claim, and retry-once tests.
+- [ ] Run the live Gummy Alpha evaluation in a network-enabled environment and record latency/token usage. The UI already captures both; local outbound DNS was unavailable on 2026-07-21.
 
 ### Remaining contract and materialization work
 

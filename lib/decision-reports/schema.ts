@@ -54,11 +54,11 @@ export type DecisionReportV1 = {
 export type MetricProjection = {
   metricName: string;
   definition: string;
-  baselinePct: number;
-  predictedPct: number;
+  baselinePct: number | null;
+  predictedPct: number | null;
   baselineLabel: string;
   predictionLabel: string;
-  evidenceState: "illustrative_assumption";
+  evidenceState: "illustrative_assumption" | "prompt_supplied" | "missing";
 };
 
 export type DecisionReportGoldenExample = {

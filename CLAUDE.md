@@ -41,7 +41,7 @@ There is no `/src` tree, LangGraph layer, Recharts/Tremor dependency, or TanStac
 ## Active Decision Report boundary
 
 - Slice 1 is implemented at `/onboarding`: `components/decision-report/` renders the compact editable report, while `lib/decision-reports/` owns the versioned schema, validation, tests, and Gummy Alpha fixture.
-- Slice 2 adds bounded live generation behind the same report contract. The deterministic fixture remains the fallback and local review path.
+- Slice 2 is implemented behind the same report contract: the core AI SDK calls Vercel AI Gateway server-side, model output contains no trusted IDs, exact evidence excerpts are verified against the bounded prompt, and unsafe or failed output becomes an editable fallback. A network-enabled live Gummy Alpha telemetry run remains.
 - One typed report aggregate remains the draft during onboarding.
 - One final idempotent operation materializes the decision, prediction, metric relationship, and selected actions.
 - Partner inputs are limited to the initial prompt, pasted supporting text, an existing metric or one metric CSV, and one re-encoded PNG/JPEG mock-up.

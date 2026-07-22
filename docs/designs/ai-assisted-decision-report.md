@@ -12,9 +12,9 @@ Mode: Startup
 
 ## Implementation Status
 
-Slice 1 shipped on `codex/ai-decision-report` on 2026-07-21. `/onboarding` now renders the deterministic Gummy Alpha golden prompt into the compact, editable three-section report. The versioned schema, five provenance states, runtime validation, illustrative metric chart, seven-action ceiling, and visible missing fields are implemented and contract-tested.
+Slice 1 and the Slice 2 bounded-generation implementation shipped on `codex/ai-decision-report` on 2026-07-21. `/onboarding` sends arbitrary bounded prompts through a server-only Vercel AI Gateway seam and renders the compact, editable three-section report. The model DTO contains no trusted IDs; application code assigns IDs, verifies exact evidence excerpts, removes unsupported numeric and sensitive implementation claims, and preserves the deterministic fixture plus a safe arbitrary-prompt fallback. Timeout, refusal, malformed-output, unsupported-claim, and retry-once tests are green.
 
-Slice 2 is active: bounded live generation will produce untrusted report content behind the same schema, while application code assigns IDs, validates provenance, and preserves the deterministic fixture as the development and provider-failure fallback. Persistence, inline gap assistance, metric handoff, and idempotent materialization remain later slices.
+A network-enabled Gummy Alpha latency/token evaluation remains before declaring Slice 2 complete. Persistence, inline gap assistance, metric handoff, and idempotent materialization remain later slices.
 
 ## Problem Statement
 

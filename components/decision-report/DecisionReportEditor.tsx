@@ -39,12 +39,19 @@ export function DecisionReportEditor({
   projection,
   workspaceName,
   projectName,
+  generationMeta,
   onStartOver,
 }: {
   initialReport: DecisionReportV1;
   projection: MetricProjection;
   workspaceName: string;
   projectName: string;
+  generationMeta?: {
+    mode: "live" | "fixture" | "fallback";
+    warning: string | null;
+    latencyMs: number;
+    totalTokens: number | null;
+  };
   onStartOver: () => void;
 }) {
   const [report, setReport] = useState(() => cloneDecisionReport(initialReport));
@@ -90,6 +97,11 @@ export function DecisionReportEditor({
 
   return (
     <div className="flex flex-col gap-3 pb-16">
+      {generationMeta?.warning ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] leading-5 text-amber-900" role="status">
+          {generationMeta.warning}
+        </div>
+      ) : null}
       <header className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm shadow-slate-200/40 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -100,6 +112,14 @@ export function DecisionReportEditor({
               <span className="rounded-full bg-teal-50 px-2 py-0.5 font-semibold text-[var(--pos)]">
                 Draft
               </span>
+              {generationMeta ? (
+                <span>
+                  {generationMeta.mode === "live" ? "AI generated" : generationMeta.mode === "fixture" ? "Fixture mode" : "Safe fallback"}
+                  {generationMeta.mode === "live"
+                    ? ` · ${(generationMeta.latencyMs / 1000).toFixed(1)}s${generationMeta.totalTokens ? ` · ${generationMeta.totalTokens.toLocaleString()} tokens` : ""}`
+                    : ""}
+                </span>
+              ) : null}
             </div>
             <input
               className="mt-2 w-full bg-transparent text-[24px] font-semibold leading-tight text-[var(--text)] outline-none sm:text-[28px]"
