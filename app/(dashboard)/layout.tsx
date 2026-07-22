@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { GlobalHeader } from "@/components/shell/GlobalHeader";
 import { TabStrip } from "@/components/shell/TabStrip";
 import { CoreMetricsDrawer } from "@/components/shell/CoreMetricsDrawer";
@@ -13,18 +14,21 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { scope, metrics, actions, impactWindow } = await loadDashboardData();
+  const { scope, metrics, actions, decisions, impactWindow } = await loadDashboardData();
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[var(--bg)]">
       <GlobalHeader />
       <TabStrip scope={scope} />
       <main className="scroll-slim min-h-0 flex-1 overflow-y-auto">{children}</main>
-      <CoreMetricsDrawer
-        metrics={metrics}
-        actions={actions}
-        impactWindow={impactWindow}
-      />
+      <Suspense fallback={null}>
+        <CoreMetricsDrawer
+          metrics={metrics}
+          actions={actions}
+          decisions={decisions}
+          impactWindow={impactWindow}
+        />
+      </Suspense>
     </div>
   );
 }

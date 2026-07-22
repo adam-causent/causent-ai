@@ -10,6 +10,7 @@ import { DecisionDetail } from "@/components/actions/DecisionDetail";
 import { DecisionList } from "@/components/actions/DecisionList";
 import { ObjectivePanel } from "@/components/actions/ObjectivePanel";
 import { PredictionCapture } from "@/components/actions/PredictionCapture";
+import { selectActionPlanView } from "@/lib/data/action-plan-view";
 
 // Client half of the Actions & Decisions tab, restructured around the intent
 // layer (epic #6, #10): DECISIONS are the top-level list (each parenting its
@@ -36,22 +37,28 @@ export function ActionsPageClient({
 }) {
   const searchParams = useSearchParams();
   const paramId = searchParams.get("selected");
+  const view = useMemo(
+    () => selectActionPlanView(decisions, actions),
+    [actions, decisions],
+  );
+  const visibleActions = view.actions;
+  const visibleDecisions = view.decisions;
 
   const decisionByActionId = useMemo(() => {
     const map = new Map<string, string>();
-    for (const d of decisions) for (const id of d.actionIds) map.set(id, d.id);
+    for (const d of visibleDecisions) for (const id of d.actionIds) map.set(id, d.id);
     return map;
-  }, [decisions]);
+  }, [visibleDecisions]);
 
   const ungrouped = useMemo(
-    () => actions.filter((a) => !decisionByActionId.has(a.id)),
-    [actions, decisionByActionId],
+    () => visibleActions.filter((a) => !decisionByActionId.has(a.id)),
+    [visibleActions, decisionByActionId],
   );
 
   function selectionForParam(id: string | null): Selection | null {
     if (!id) return null;
-    if (decisions.some((d) => d.id === id)) return { kind: "decision", id };
-    if (actions.some((a) => a.id === id)) {
+    if (visibleDecisions.some((d) => d.id === id)) return { kind: "decision", id };
+    if (visibleActions.some((a) => a.id === id)) {
       const parent = decisionByActionId.get(id);
       // An action inside a decision deep-links to the decision (the intent is
       // the unit); a bare action selects itself.
@@ -61,10 +68,10 @@ export function ActionsPageClient({
   }
 
   const paramSelection = selectionForParam(paramId);
-  const fallback: Selection | null = decisions[0]
-    ? { kind: "decision", id: decisions[0].id }
-    : actions[0]
-      ? { kind: "action", id: actions[0].id }
+  const fallback: Selection | null = visibleDecisions[0]
+    ? { kind: "decision", id: visibleDecisions[0].id }
+    : visibleActions[0]
+      ? { kind: "action", id: visibleActions[0].id }
       : null;
 
   const [selected, setSelected] = useState<Selection | null>(paramSelection ?? fallback);
@@ -80,13 +87,17 @@ export function ActionsPageClient({
   }
 
   const selectedDecision =
-    selected?.kind === "decision" ? decisions.find((d) => d.id === selected.id) : undefined;
+    selected?.kind === "decision"
+      ? visibleDecisions.find((d) => d.id === selected.id)
+      : undefined;
   const selectedAction =
-    selected?.kind === "action" ? actions.find((a) => a.id === selected.id) : undefined;
+    selected?.kind === "action"
+      ? visibleActions.find((a) => a.id === selected.id)
+      : undefined;
 
   return (
     <div className="mx-auto flex h-full max-w-[1360px] flex-col gap-4 p-5">
-      {objective && <ObjectivePanel objective={objective} />}
+      {view.showLegacyObjective && objective ? <ObjectivePanel objective={objective} /> : null}
 
       {capturing && (
         <PredictionCapture
@@ -111,7 +122,7 @@ export function ActionsPageClient({
             </button>
           </div>
           <DecisionList
-            decisions={decisions}
+            decisions={visibleDecisions}
             metrics={metrics}
             selectedId={selected?.kind === "decision" ? selected.id : null}
             onSelect={(id) => setSelected({ kind: "decision", id })}
@@ -134,7 +145,7 @@ export function ActionsPageClient({
           {selectedDecision && (
             <DecisionDetail
               decision={selectedDecision}
-              actions={actions}
+              actions={visibleActions}
               metrics={metrics}
               onSelectAction={(id) => setSelected({ kind: "action", id })}
             />

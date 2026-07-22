@@ -188,6 +188,8 @@ export type Prediction = {
 export type Decision = {
   id: string;
   title: string;
+  /** Creation path. Optional only for the deterministic legacy seed fixtures. */
+  origin?: "decision_report" | "legacy";
   /** ISO yyyy-mm-dd. */
   createdAt: string;
   /** Why — plain paragraphs for v1 (mirrors decisions.rationale). */

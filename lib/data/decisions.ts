@@ -16,7 +16,7 @@ import { toActionIdentity } from "@/lib/data/action-identifiers";
 
 type RationaleDoc = {
   content?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
-  meta?: { mechanism_category?: string };
+  meta?: { mechanism_category?: string; source?: string };
 };
 
 type RevisionRow = {
@@ -133,6 +133,9 @@ export async function getDecisions(): Promise<Decision[]> {
     return {
       id: row.decision_id,
       title: row.title,
+      origin: row.rationale?.meta?.source === "decision_report"
+        ? "decision_report"
+        : "legacy",
       createdAt: row.created_at.slice(0, 10),
       rationale: {
         body: paragraphs(row.rationale),
