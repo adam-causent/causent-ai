@@ -29,11 +29,13 @@ export function ActionsPageClient({
   decisions,
   metrics,
   objective,
+  connectorMetricId,
 }: {
   actions: Action[];
   decisions: Decision[];
   metrics: Metric[];
   objective: ProjectObjective | null;
+  connectorMetricId: string | null;
 }) {
   const searchParams = useSearchParams();
   const paramId = searchParams.get("selected");
@@ -148,6 +150,7 @@ export function ActionsPageClient({
               actions={visibleActions}
               metrics={metrics}
               onSelectAction={(id) => setSelected({ kind: "action", id })}
+              connectorMetricId={connectorMetricId}
             />
           )}
           {selectedAction && <ActionDetail action={selectedAction} metrics={metrics} />}

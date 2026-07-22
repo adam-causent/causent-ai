@@ -14,7 +14,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { scope, metrics, actions, decisions, impactWindow } = await loadDashboardData();
+  const { scope, metrics, actions, decisions, impactWindow, activeDecisionReport } = await loadDashboardData();
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[var(--bg)]">
@@ -27,6 +27,7 @@ export default async function DashboardLayout({
           actions={actions}
           decisions={decisions}
           impactWindow={impactWindow}
+          projectMetricLabel={activeDecisionReport?.metricProjection.metricName ?? null}
         />
       </Suspense>
     </div>

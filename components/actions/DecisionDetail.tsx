@@ -15,6 +15,7 @@ import {
   recordScorecardView,
 } from "@/app/(dashboard)/actions/server-actions";
 import { actionReferenceLabel } from "@/components/actions/ActionReference";
+import { LeverCreate } from "@/components/onboarding/LeverCreate";
 
 // The decision detail view (replaces the action-centric DecisionEditor):
 // intent (rationale) → the actions carrying it (lever marked) → the
@@ -203,11 +204,13 @@ export function DecisionDetail({
   actions,
   metrics,
   onSelectAction,
+  connectorMetricId,
 }: {
   decision: Decision;
   actions: Action[];
   metrics: Metric[];
   onSelectAction: (id: string) => void;
+  connectorMetricId: string | null;
 }) {
   const metricById = new Map(metrics.map((m) => [m.id, m]));
   const actionById = new Map(actions.map((a) => [a.id, a]));
@@ -307,6 +310,16 @@ export function DecisionDetail({
           <p className="text-[12px] text-[var(--text-subtle)]">No prediction committed.</p>
         )}
       </section>
+
+      {decision.origin === "decision_report" && !decision.leverActionId && connectorMetricId ? (
+        <LeverCreate
+          decisionId={decision.id}
+          metricId={connectorMetricId}
+          title={decision.title}
+          mechanismSummary={decision.rationale.body.join("\n\n") || decision.title}
+          mechanismCategory={decision.rationale.mechanismCategory}
+        />
+      ) : null}
     </div>
   );
 }

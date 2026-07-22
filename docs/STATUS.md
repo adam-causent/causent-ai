@@ -17,10 +17,11 @@ metric relationship, and selected actions. Approved design:
 
 ## TL;DR
 
-**Both existing loops are on `main`; Decision Report Slices 1–5 are implemented on
+**Both existing loops are on `main`; Decision Report Slices 1–6 are implemented on
 `codex/ai-decision-report`. Bounded generation, durable report persistence, human-controlled
 metric/prediction/action activation, and the atomic Actions & Decisions handoff are
-live-validated. Metric creation/CSV ingestion, supplied-image handling, Reports-tab indexing,
+live-validated. Report-native dashboard isolation and Reports-tab indexing are implemented.
+Metric creation/CSV ingestion, supplied-image handling,
 feature-flag rollout, and partner acceptance remain.**
 The retrospective loop closed 2026-07-08 (PR #1) and the
 **prospective Foundations tranche landed 2026-07-12 (PR #12, epic #6, children #7–#11
@@ -87,7 +88,7 @@ delivery, or production automation.
 ☐ CONNECT  SUPABASE_SERVICE_ROLE_KEY deliberately withheld from Vercel → webhook auto-detect
            + reconcile cron return 500 (paste-URL attribution works; deliberate, reversible)
 ☐ OPEN     #16 connector live (creds) · #18 drift-alert surface (gated) · ~~#19 Jira parity~~ (PR #25)
-◐ ACTIVE   AI-assisted Decision Report partner wedge: Slices 1–5 complete. The 24.4s
+◐ ACTIVE   AI-assisted Decision Report partner wedge: Slices 1–6 complete. The 24.4s
            six-action baseline triggered a sparse three-proof/three-action contract; live
            re-benchmark passed in 13.9s. Durable explicit save/reload is now verified;
            explicit metric/prediction/action activation now materializes atomically and
@@ -386,7 +387,7 @@ tabs. Structure (as-built lives at repo root, NOT `/src`):
 - The final materialization step is implemented; lever/tracker selection stays separate.
 - Feature-flagged rollout with legacy onboarding as rollback.
 
-Slices 1–5 delivered the interactive report, bounded generation seam, deterministic completion layer, durable revisions, and atomic activation handoff. Remaining target: partner inputs, rollout controls, and end-to-end acceptance in
+Slices 1–6 delivered the interactive report, bounded generation seam, deterministic completion layer, durable revisions, atomic activation handoff, and report-native dashboard isolation with tracker continuation. Remaining target: partner inputs, rollout controls, and end-to-end acceptance in
 roughly 2–3 weeks; stabilized wedge in 3–5 weeks at 15–25 focused hours/week.
 
 ### 3. Validate before production expansion

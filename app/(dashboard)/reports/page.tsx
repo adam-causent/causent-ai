@@ -1,5 +1,6 @@
 import { loadDashboardData } from "@/lib/data/dashboard";
 import { ReportsPageClient } from "@/components/reports/ReportsPageClient";
+import { DecisionReportsIndex } from "@/components/reports/DecisionReportsIndex";
 
 // Server page: reads the full dashboard payload (Supabase, seed fallback) and hands
 // the saved reports + the project rollup data to the client, which owns the
@@ -14,7 +15,12 @@ export default async function ReportsPage() {
     impactByMetric,
     metrics,
     actions,
+    decisionReports,
   } = await loadDashboardData();
+
+  if (decisionReports.length > 0) {
+    return <DecisionReportsIndex reports={decisionReports} />;
+  }
 
   return (
     <ReportsPageClient

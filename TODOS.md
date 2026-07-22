@@ -90,18 +90,31 @@ Acceptance: a saved reviewed Gummy Alpha report requires explicit human metric/p
 
 Non-goals: metric creation, CSV ingestion, source/assets/uploads, connectors, tracker ticket creation, lever selection, causal impact, Completion Outlook, and per-keystroke autosave.
 
-### Work after Slice 5
+### Work after Slice 6
+
+### Completed Slice 6 — report-native dashboard isolation and connector handoff
+
+Goal: make an activated Decision Report the visible project boundary throughout the dashboard and continue its plan into the existing tracker workflow.
+
+- [x] Load durable Decision Reports and current revisions into the dashboard through runtime validation.
+- [x] Use the newest activated report's canonical decision, selected actions, and confirmed metric as the shared dataset for Core Metrics, Data Workshop, Actions & Decisions, and Impact.
+- [x] Suppress workspace-wide objectives, metrics, actions, impact aggregates, and legacy report fixtures once the report project boundary is active.
+- [x] Index saved Decision Reports in Reports with a compact native preview and stable link back to the full report.
+- [x] Carry the existing Jira/GitHub create, read-only deep-link, and paste-attribution UI into a report-origin decision until a lever is linked.
+- [x] Preserve the complete legacy dashboard for workspaces without an activated Decision Report.
+- [x] Add pure regression coverage for report isolation and run TypeScript, focused lint, all 384 library tests, diff checks, and the webpack production build.
+
+Acceptance: after report activation, no deterministic study metric, objective, action, impact aggregate, or stakeholder-report fixture appears in the report project; the confirmed metric and selected planned actions remain visible across tabs; Reports shows the saved Decision Report; and Actions & Decisions offers the established GitHub/Jira lever flow.
 
 - Add private Storage handling for one size-capped PNG/JPEG: magic-byte validation, decode/re-encode, scoped read, deletion, and failure states.
-- Add a real metric-creation/CSV ingestion path in Data Workshop; Slice 5 currently confirms only an existing workspace metric and provides a return link.
-- Store or index Decision Reports in the Reports tab instead of relying only on the stable onboarding report URL.
+- Add a real metric-creation/CSV ingestion path in Data Workshop; Slice 6 isolates the confirmed metric but does not add ingestion writes.
 - Keep lever creation as a subsequent explicit action-selection step.
 - Feature-flag the new onboarding per user/workspace; preserve legacy onboarding as rollback.
 
 ### Persistence and materialization
 
 - Preserve state through refresh and Back; consider autosave only after explicit-save behavior is reliable.
-- Store the reviewed report in Reports; activated work already surfaces in Actions & Decisions.
+- Expand Reports from the current report-native index/preview only if partner use requires revision history or export.
 
 ### Partner verification
 
@@ -143,7 +156,7 @@ Only begin these after the Decision Report partner gate passes:
 
 - Replace remaining demo service-role dashboard reads with per-request `@supabase/ssr` RLS clients where live freshness is required.
 - Add dynamic rendering or explicit revalidation to dashboard routes that must reflect per-request data.
-- Persist reports from the database; the current dashboard DB path still returns an empty reports collection.
+- Add revision-history and export surfaces only if report-index partner use calls for them.
 - Finish inert destinations only when their flows exist: New Project, Settings, manual action, and credentialed connector controls.
 - Make `LineTimeSeries` x-axis tick density viewport-aware.
 - Resolve the duplicate “Core Metrics Summary” heading on Data Workshop when the drawer is open.

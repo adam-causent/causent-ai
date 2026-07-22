@@ -47,11 +47,24 @@ export default async function DataWorkshopPage({
   const returnTo = requestedReturn && /^\/onboarding\?report=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedReturn)
     ? requestedReturn
     : null;
-  const { metrics } = await loadDashboardData();
-  const metricConnections = summarizeMetricConnections(metrics.length);
+  const { metrics, activeDecisionReport } = await loadDashboardData();
+  const metricConnections = activeDecisionReport
+    ? {
+        connected: metrics.filter((metric) => metric.series.length > 0).length,
+        total: 1,
+      }
+    : summarizeMetricConnections(metrics.length);
 
   return (
     <div className="mx-auto flex max-w-[1360px] flex-col gap-4 p-5">
+      {activeDecisionReport ? (
+        <div className="rounded-xl border border-teal-200 bg-teal-50/70 px-4 py-3">
+          <p className="text-[12px] font-semibold text-teal-950">{activeDecisionReport.title}</p>
+          <p className="mt-0.5 text-[11px] leading-5 text-teal-900/75">
+            This project shows only the metric confirmed when the Decision Report was activated.
+          </p>
+        </div>
+      ) : null}
       {returnTo ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-teal-200 bg-teal-50/70 px-4 py-3">
           <div>
@@ -71,7 +84,7 @@ export default async function DataWorkshopPage({
             <CsvDropzone />
           </Panel>
           <Panel>
-            <ConnectedMetrics metrics={metrics} />
+            <ConnectedMetrics metrics={metrics} connectionSummary={metricConnections} />
           </Panel>
         </div>
 
@@ -108,6 +121,11 @@ export default async function DataWorkshopPage({
               <span className="text-[12px] text-[var(--text-muted)]">{m.cadence}</span>
             </div>
           ))}
+          {metrics.length === 0 ? (
+            <p className="text-[12px] text-[var(--text-muted)]">
+              The report metric has not been connected to a supported daily series yet.
+            </p>
+          ) : null}
         </div>
 
         <button className="mt-4 flex w-full flex-col items-center gap-0.5 rounded-lg border border-dashed border-[var(--border-strong)] py-3 text-[var(--brand-blue)] hover:bg-black/[0.02]">

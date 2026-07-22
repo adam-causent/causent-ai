@@ -12,7 +12,7 @@ import { ActionsPageClient } from "@/components/actions/ActionsPageClient";
 export const dynamic = "force-dynamic";
 
 export default async function ActionsPage() {
-  const { actions, decisions, metrics, objective } = await loadDashboardData();
+  const { actions, decisions, metrics, objective, activeDecisionReport } = await loadDashboardData();
   return (
     <Suspense>
       <ActionsPageClient
@@ -20,6 +20,7 @@ export default async function ActionsPage() {
         decisions={decisions}
         metrics={metrics}
         objective={objective}
+        connectorMetricId={activeDecisionReport?.metricId ?? null}
       />
     </Suspense>
   );

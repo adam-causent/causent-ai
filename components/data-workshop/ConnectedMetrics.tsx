@@ -13,8 +13,14 @@ function updatedLabel(iso: string): string {
   return `${formatLongDate(iso.slice(0, 10))} ${time}`;
 }
 
-export function ConnectedMetrics({ metrics }: { metrics: Metric[] }) {
-  const summary = summarizeMetricConnections(metrics.length);
+export function ConnectedMetrics({
+  metrics,
+  connectionSummary,
+}: {
+  metrics: Metric[];
+  connectionSummary?: { connected: number; total: number };
+}) {
+  const summary = connectionSummary ?? summarizeMetricConnections(metrics.length);
 
   return (
     <div>

@@ -20,11 +20,16 @@ import type {
   Scope,
 } from "@/lib/types";
 import { getScope } from "@/lib/data/scope";
-import { getMetrics } from "@/lib/data/metrics";
 import { getActions } from "@/lib/data/actions";
 import { getDecisions } from "@/lib/data/decisions";
 import { getImpactByMetric, getAggregatedImpact } from "@/lib/data/impact";
 import { getObjective } from "@/lib/data/objective";
+import { getMetricRecords } from "@/lib/data/metrics";
+import {
+  getDecisionReports,
+  type DashboardDecisionReport,
+} from "@/lib/data/decision-reports";
+import { selectReportProjectView } from "@/lib/data/report-project-view";
 import * as seed from "@/lib/seed";
 
 /** The 30-day-ish reporting window shown in the drawer/impact headers. */
@@ -44,6 +49,10 @@ export type DashboardData = {
   objective: ProjectObjective | null;
   /** Saved stakeholder reports (empty until a DB-backed reports table exists). */
   reports: Report[];
+  /** Durable Decision Reports, newest first. */
+  decisionReports: DashboardDecisionReport[];
+  /** The activated report currently defining the dashboard project boundary. */
+  activeDecisionReport: DashboardDecisionReport | null;
   /** Which source actually served this payload (for diagnostics/telemetry). */
   source: "db" | "seed";
 };
@@ -72,6 +81,8 @@ function seedData(): DashboardData {
     impactWindow: { start: seed.impactWindow.start, end: seed.impactWindow.end },
     objective: seed.projectObjective,
     reports: seed.reports,
+    decisionReports: [],
+    activeDecisionReport: null,
     source: "seed",
   };
 }
@@ -92,28 +103,43 @@ export const loadDashboardData = cache(async function loadDashboardData(): Promi
   if (seedForced()) return seedData();
 
   try {
-    const [scope, metrics, actions, decisions, aggregatedImpact, impactByMetric, objective] =
+    const [scope, metricRecords, actions, decisions, aggregatedImpact, impactByMetric, objective, decisionReports] =
       await Promise.all([
         getScope(),
-        getMetrics(),
+        getMetricRecords(),
         getActions(),
         getDecisions(),
         getAggregatedImpact(),
         getImpactByMetric(),
         getObjective(),
+        getDecisionReports(),
       ]);
-    return {
-      scope,
-      metrics,
+    const metrics = metricRecords.map((record) => record.metric);
+    const project = selectReportProjectView({
+      reports: decisionReports,
       actions,
       decisions,
+      metrics,
+      metricUiIdByDbId: new Map(
+        metricRecords.map((record) => [record.metricId, record.metric.id]),
+      ),
       aggregatedImpact,
       impactByMetric,
-      impactWindow: deriveImpactWindow(metrics),
-      objective,
+    });
+    return {
+      scope,
+      metrics: project.metrics,
+      actions: project.actions,
+      decisions: project.decisions,
+      aggregatedImpact: project.aggregatedImpact,
+      impactByMetric: project.impactByMetric,
+      impactWindow: deriveImpactWindow(project.metrics),
+      objective: project.activeReport ? null : objective,
       // TODO: source reports from a project-level `reports` table once the
       // schema carries one; until then the DB path has no saved reports.
       reports: [],
+      decisionReports,
+      activeDecisionReport: project.activeReport,
       source: "db",
     };
   } catch (err) {

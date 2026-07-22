@@ -32,11 +32,13 @@ export function CoreMetricsDrawer({
   actions,
   decisions,
   impactWindow,
+  projectMetricLabel,
 }: {
   metrics: Metric[];
   actions: Action[];
   decisions: Decision[];
   impactWindow: { start: string; end: string };
+  projectMetricLabel: string | null;
 }) {
   const [open, setOpen] = useState(true);
   const pathname = usePathname();
@@ -47,8 +49,9 @@ export function CoreMetricsDrawer({
   const visibleMetrics = reportMetricView?.metric ? [reportMetricView.metric] : metrics;
   const visibleActions = reportMetricView?.actions ?? actions;
   const reportMetricNeedsData = Boolean(
-    reportMetricView &&
-      (!reportMetricView.metric || reportMetricView.metric.series.length === 0),
+    (reportMetricView &&
+      (!reportMetricView.metric || reportMetricView.metric.series.length === 0)) ||
+      (projectMetricLabel && metrics.length === 0),
   );
 
   const chartMetrics = visibleMetrics.slice(0, 3); // stacked hero charts
@@ -97,7 +100,7 @@ export function CoreMetricsDrawer({
           />
           Core Metrics
           <span className="text-[var(--text-subtle)]">
-            {reportMetricView
+            {reportMetricView || projectMetricLabel
               ? reportMetricNeedsData
                 ? "no data"
                 : "1/1"
@@ -121,11 +124,11 @@ export function CoreMetricsDrawer({
 
       {open && (
         <div className="flex gap-4 px-5 pb-4">
-          {reportMetricNeedsData && reportMetricView ? (
+          {reportMetricNeedsData ? (
             <div className="flex w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
               <div>
                 <p className="text-[12px] font-semibold text-amber-950">
-                  {reportMetricView.metricLabel ?? "No core metric confirmed"}
+                  {reportMetricView?.metricLabel ?? projectMetricLabel ?? "No core metric confirmed"}
                 </p>
                 <p className="mt-0.5 text-[11px] text-amber-900/75">
                   This metric is inherited from the Decision Report, but it has no connected series to chart yet.
