@@ -4,13 +4,12 @@ import { Panel } from "@/components/ui/Panel";
 import { CsvDropzone } from "@/components/data-workshop/CsvDropzone";
 import { ConnectedMetrics } from "@/components/data-workshop/ConnectedMetrics";
 import { PlusIcon } from "@/components/ui/icons";
-
-const CAP = 5;
+import { summarizeMetricConnections } from "@/lib/data/metric-connections";
 
 function ProgressRing({ value, cap }: { value: number; cap: number }) {
   const r = 20;
   const c = 2 * Math.PI * r;
-  const filled = (value / cap) * c;
+  const filled = cap > 0 ? (value / cap) * c : 0;
   return (
     <svg width="52" height="52" viewBox="0 0 52 52">
       <circle cx="26" cy="26" r={r} fill="none" stroke="var(--border)" strokeWidth="5" />
@@ -49,6 +48,7 @@ export default async function DataWorkshopPage({
     ? requestedReturn
     : null;
   const { metrics } = await loadDashboardData();
+  const metricConnections = summarizeMetricConnections(metrics.length);
 
   return (
     <div className="mx-auto flex max-w-[1360px] flex-col gap-4 p-5">
@@ -84,14 +84,14 @@ export default async function DataWorkshopPage({
             </h3>
             <div className="mt-2 flex items-baseline gap-1.5">
               <span className="text-[28px] font-bold tabular-nums text-[var(--text)]">
-                {metrics.length}
+                {metricConnections.connected}
               </span>
               <span className="text-[13px] text-[var(--text-muted)]">
-                /{CAP} metrics connected
+                /{metricConnections.total} metrics connected
               </span>
             </div>
           </div>
-          <ProgressRing value={metrics.length} cap={CAP} />
+          <ProgressRing value={metricConnections.connected} cap={metricConnections.total} />
         </div>
 
         <div className="mt-4 space-y-2.5 border-t border-[var(--border)] pt-4">
@@ -115,7 +115,7 @@ export default async function DataWorkshopPage({
             <PlusIcon size={14} /> Add / Layer Metric
           </span>
           <span className="text-[11px] text-[var(--text-subtle)]">
-            {metrics.length} of {CAP} added
+            {metricConnections.connected} of {metricConnections.total} connected
           </span>
         </button>
         </Panel>
