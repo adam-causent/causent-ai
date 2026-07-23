@@ -11,6 +11,7 @@ import { DecisionList } from "@/components/actions/DecisionList";
 import { ObjectivePanel } from "@/components/actions/ObjectivePanel";
 import { PredictionCapture } from "@/components/actions/PredictionCapture";
 import { selectActionPlanView } from "@/lib/data/action-plan-view";
+import type { DecisionReportV1 } from "@/lib/decision-reports/schema";
 
 // Client half of the Actions & Decisions tab, restructured around the intent
 // layer (epic #6, #10): DECISIONS are the top-level list (each parenting its
@@ -30,12 +31,14 @@ export function ActionsPageClient({
   metrics,
   objective,
   connectorMetricId,
+  decisionReport,
 }: {
   actions: Action[];
   decisions: Decision[];
   metrics: Metric[];
   objective: ProjectObjective | null;
   connectorMetricId: string | null;
+  decisionReport: DecisionReportV1 | null;
 }) {
   const searchParams = useSearchParams();
   const paramId = searchParams.get("selected");
@@ -96,6 +99,30 @@ export function ActionsPageClient({
     selected?.kind === "action"
       ? visibleActions.find((a) => a.id === selected.id)
       : undefined;
+
+  if (view.mode === "decision_report") {
+    return (
+      <div className="mx-auto flex h-full max-w-[1360px] flex-col p-5">
+        <Panel className="min-h-0 flex-1 overflow-hidden">
+          {selectedDecision ? (
+            <DecisionDetail
+              decision={selectedDecision}
+              actions={visibleActions}
+              metrics={metrics}
+              onSelectAction={() => undefined}
+              connectorMetricId={connectorMetricId}
+              report={decisionReport}
+              selectedActionId={visibleActions.some((action) => action.id === paramId) ? paramId : null}
+            />
+          ) : (
+            <p className="text-[13px] text-[var(--text-subtle)]">
+              This report does not have an activated decision yet.
+            </p>
+          )}
+        </Panel>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto flex h-full max-w-[1360px] flex-col gap-4 p-5">

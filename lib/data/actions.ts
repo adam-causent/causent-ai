@@ -26,7 +26,12 @@ type RationaleDoc = {
   type?: string;
   title?: string;
   content?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
-  meta?: { expected_metric?: string };
+  meta?: {
+    expected_metric?: string;
+    source_item_id?: string;
+    owner_label?: string;
+    manual_completion?: { completed_on?: string; explanation?: string };
+  };
 };
 
 /** Flatten a rationale doc's paragraphs into plain-text lines. */
@@ -88,6 +93,8 @@ export async function getActions(): Promise<Action[]> {
       pr: identity.pr,
       source: identity.source,
       referenceLabel: identity.referenceLabel,
+      sourceItemId: doc?.meta?.source_item_id,
+      ownerLabel: doc?.meta?.owner_label,
       title: doc?.title ?? row.external_ref ?? identity.referenceLabel,
       shippedAt: row.effective_date ?? (row.ship_ts ? row.ship_ts.slice(0, 10) : null),
       primaryMetricId,
@@ -99,6 +106,13 @@ export async function getActions(): Promise<Action[]> {
         hypothesis: body[0],
         expectedMetricId: primaryMetricId,
         body,
+      };
+    }
+    const completion = doc?.meta?.manual_completion;
+    if (completion?.completed_on && completion.explanation) {
+      action.manualCompletion = {
+        completedOn: completion.completed_on,
+        explanation: completion.explanation,
       };
     }
     return action;

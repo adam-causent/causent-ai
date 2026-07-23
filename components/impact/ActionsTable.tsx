@@ -8,7 +8,8 @@ import {
 } from "@/components/actions/ActionReference";
 
 // One row per action (always — clustering is an overlay, never hides a row). Each
-// metric cell renders the authoritative (ITS) impact with a colorblind-safe cue.
+// metric cell renders authoritative ITS impact when confident, or the explicitly
+// labeled preliminary 14-day descriptive cross-check while ITS gathers history.
 
 export function ActionsTable({
   actions,
@@ -66,15 +67,21 @@ export function ActionsTable({
                   const c = byMetric.get(id);
                   return (
                     <td key={id} className="px-2 py-2.5 text-right">
-                      {c && c.direction !== "neutral" ? (
-                        <span className="inline-flex justify-end">
+                      {c && c.value !== null ? (
+                        <div className="inline-flex flex-col items-end" title={c.detail}>
                           <Delta
                             direction={c.direction}
                             label={c.label}
                             good={c.good}
                             size="sm"
+                            tone={c.evidence === "descriptive" ? "neutral" : "auto"}
                           />
-                        </span>
+                          {c.evidence === "descriptive" ? (
+                            <span className="mt-0.5 text-[10px] font-medium text-[var(--text-subtle)]">
+                              14-day descriptive{c.detail?.includes("Overlaps") ? " · overlapping actions" : ""}
+                            </span>
+                          ) : null}
+                        </div>
                       ) : (
                         <span className="text-[var(--text-subtle)]">—</span>
                       )}

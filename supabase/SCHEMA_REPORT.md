@@ -2,13 +2,45 @@
 
 Branch: `feat/schema-rls` · Migrations: `20260703223627_v1_schema.sql`, `20260703223628_v1_rls.sql`
 
-Historical note: this report records the original v1 schema review. The active
-`codex/ai-decision-report` branch adds `decision_reports`, append-only
-`decision_report_revisions`, and append-only `decision_report_activations` through
-the Slice 4/5 migrations beginning at `20260722052759_decision_report_persistence.sql`.
+Historical note: this report records the original v1 schema review. Later Decision Report
+migrations add `decision_reports`, append-only `decision_report_revisions`, and append-only
+`decision_report_activations` beginning at `20260722052759_decision_report_persistence.sql`.
 Authenticated reads are scope-bound through `has_scope_access`; direct application
 writes are revoked and checked security-definer RPCs require member access. The
-current isolation gate inspects at least 22 public tables and passes 22/22 tests.
+current isolation gate includes `report_assets`; the focused tenant-isolation and adversarial
+suite covers the later report surfaces and rollout assignments as well and passes 41/41 cases.
+
+Slice 8 adds a private `decision-report-assets` bucket and the `report_assets` lifecycle table.
+Application roles have scoped SELECT only; checked security-definer RPCs reserve, attach, detach,
+and abandon metadata at member rank. Storage policies allow only matching pending uploads,
+member-scoped attached reads, and pending/detached deletes. A revision trigger rejects any
+`assetIds` value that is not the report's one attached asset, closing the ordinary-save promotion
+path. Object bytes are always created/deleted through the Storage API, never direct SQL.
+
+The workspace metric follow-up adds `metrics.is_core` plus
+`set_workspace_core_metric_v1`. The checked function locks the workspace, requires member access,
+rejects cross-workspace/non-daily targets, and serializes the five-metric cap. Report activation
+still stores one confirmed prediction metric; shared core selection is a separate dashboard concern.
+
+The partner action follow-up adds `complete_manual_action_v1`. It accepts only a planned manual
+action materialized from a Decision Report in the caller's workspace, requires member access,
+rejects future dates and blank/oversized explanations, writes completion status/date plus an audit
+payload into `rationale_richtext.meta.manual_completion`, and reuses an exact retry. Connector-backed,
+legacy-manual, viewer, and cross-tenant calls fail closed.
+
+The report-history follow-up adds `decision_reports.deleted_at/deleted_by` and the checked
+`delete_decision_report_v1` RPC. Members can soft-delete a report in their workspace, including an
+activated one, and identical retries reuse the deletion receipt. Application roles retain no
+direct writes. Live-report partial indexes plus report/revision/asset SELECT policies hide removed
+history, while triggers prevent later revision, activation, or asset mutation. Canonical graph rows
+from an activated report are retained as audit history and filtered from application fallback
+views rather than deleted.
+
+Slice 9 adds `decision_report_rollouts`, keyed by workspace and authenticated user. A user may read
+only their own assignment when they also have viewer access to the workspace. Authenticated roles
+have no insert, update, or delete grant, so assignment and rollback remain operator-managed through
+the service role or direct SQL. Unassigned and lookup-failure users fail closed to legacy onboarding;
+the table does not own or mutate durable report state.
 
 Slice 5 adds the `active` report state and an atomic
 `activate_decision_report_v1` RPC. It locks the report, validates the exact current

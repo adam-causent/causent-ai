@@ -1,5 +1,10 @@
 # Decision Report Slice 8 — new-chat handoff
 
+> Superseded on 2026-07-22: Slice 8 and its accepted follow-ups are complete on
+> `codex/decision-report-slice-8`. Use
+> `memory/2026-07-22-decision-report-slice-9-handoff.md` for the next task. The prompt below is
+> retained only as historical scope evidence and must not be replayed.
+
 Copy the prompt below into a new Codex chat after the Slice 7 PR is available. If Slice 7 has not merged yet, continue from `codex/ai-decision-report`; otherwise create a fresh `codex/decision-report-slice-8` branch from updated `main`.
 
 ## Prompt

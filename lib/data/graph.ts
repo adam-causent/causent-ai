@@ -23,6 +23,12 @@ export type EdgeReadout = {
   beliefReason: string | null;
   /** Step estimate from the latest authoritative ITS evidence row (native units). */
   lift: number | null;
+  /** Non-authoritative 14-day before/after mean shift, when evaluable. */
+  descriptiveLift: number | null;
+  descriptiveCiLow: number | null;
+  descriptiveCiHigh: number | null;
+  /** True when another action's 14-day window overlaps this action. */
+  descriptiveClustered: boolean;
 };
 
 type NodeRow = { node_id: string; type: string; semantic_ref: string };
@@ -36,7 +42,11 @@ type EdgeRow = {
 };
 type EvidenceRow = {
   edge_id: string;
+  methodology: string;
   lift: number | null;
+  ci_low: number | null;
+  ci_high: number | null;
+  clustered: boolean;
   created_at: string;
   evidence_id: string;
 };
@@ -67,9 +77,9 @@ export const loadEdgeReadouts = cache(async function loadEdgeReadouts(): Promise
       .eq("scope_id", DEMO_SCOPE_ID),
     sb
       .from("evidence_objects")
-      .select("edge_id, lift, created_at, evidence_id")
+      .select("edge_id, methodology, lift, ci_low, ci_high, clustered, created_at, evidence_id")
       .eq("scope_id", DEMO_SCOPE_ID)
-      .eq("methodology", "ITS"),
+      .in("methodology", ["ITS", "BEFORE_AFTER_14D"]),
   ]);
 
   if (nodesRes.error) throw nodesRes.error;
@@ -82,18 +92,18 @@ export const loadEdgeReadouts = cache(async function loadEdgeReadouts(): Promise
 
   const nodeById = new Map(nodes.map((n) => [n.node_id, n]));
 
-  // Latest authoritative ITS lift per edge (evidence is append-only: a re-run adds a
-  // fresh row, so we take the newest by created_at, tie-broken by evidence_id —
-  // exactly the bridge/E2E ordering).
-  const latestIts = new Map<string, EvidenceRow>();
+  // Evidence is append-only. Keep the newest row for each edge + method, ordered
+  // by created_at then evidence_id exactly like the bridge/E2E contract.
+  const latestByMethod = new Map<string, EvidenceRow>();
   for (const ev of evidence) {
-    const prev = latestIts.get(ev.edge_id);
+    const key = `${ev.edge_id}::${ev.methodology}`;
+    const prev = latestByMethod.get(key);
     if (
       !prev ||
       ev.created_at > prev.created_at ||
       (ev.created_at === prev.created_at && ev.evidence_id > prev.evidence_id)
     ) {
-      latestIts.set(ev.edge_id, ev);
+      latestByMethod.set(key, ev);
     }
   }
 
@@ -105,7 +115,8 @@ export const loadEdgeReadouts = cache(async function loadEdgeReadouts(): Promise
     if (!source || !target || source.type !== "ACTION" || target.type !== "METRIC") {
       continue;
     }
-    const its = latestIts.get(edge.edge_id);
+    const its = latestByMethod.get(`${edge.edge_id}::ITS`);
+    const descriptive = latestByMethod.get(`${edge.edge_id}::BEFORE_AFTER_14D`);
     out.set(edgeKey(source.semantic_ref, target.semantic_ref), {
       actionId: source.semantic_ref,
       metricId: target.semantic_ref,
@@ -113,6 +124,13 @@ export const loadEdgeReadouts = cache(async function loadEdgeReadouts(): Promise
       beliefScore: edge.belief_score === null ? null : Number(edge.belief_score),
       beliefReason: edge.belief_reason,
       lift: its?.lift == null ? null : Number(its.lift),
+      descriptiveLift:
+        descriptive?.lift == null ? null : Number(descriptive.lift),
+      descriptiveCiLow:
+        descriptive?.ci_low == null ? null : Number(descriptive.ci_low),
+      descriptiveCiHigh:
+        descriptive?.ci_high == null ? null : Number(descriptive.ci_high),
+      descriptiveClustered: descriptive?.clustered ?? false,
     });
   }
   return out;

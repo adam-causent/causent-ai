@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { GUMMY_ALPHA_GOLDEN_EXAMPLE } from "./fixtures/gummy-alpha.ts";
 import { createSafeFallbackReport } from "./generation-contract.ts";
-import { saveDecisionReport } from "./persistence.ts";
+import { deleteDecisionReport, saveDecisionReport } from "./persistence.ts";
 
 const SCOPE_ID = "ca5e0000-0000-0000-0000-0000000000d3";
 const REPORT_ID = "ca5e0000-0000-0000-0000-0000000000e1";
@@ -110,4 +110,25 @@ test("save maps an immediate PostgREST 409 to a revision conflict", async () => 
     assert.equal(result.code, "conflict");
     assert.equal(result.currentRevisionId, REVISION_ID);
   }
+});
+
+test("delete calls the checked RPC and validates its receipt", async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const client = {
+    async rpc(name: string, args: Record<string, unknown>) {
+      calls.push({ name, args });
+      return {
+        data: [{ report_id: REPORT_ID, deleted_at: "2026-07-22T20:00:00Z", reused: false }],
+        error: null,
+      };
+    },
+  } as unknown as SupabaseClient;
+  const result = await deleteDecisionReport(client, SCOPE_ID, REPORT_ID, null);
+  assert.equal(result.ok, true);
+  assert.equal(calls[0].name, "delete_decision_report_v1");
+  assert.deepEqual(calls[0].args, {
+    p_scope_id: SCOPE_ID,
+    p_report_id: REPORT_ID,
+    p_authored_by: null,
+  });
 });

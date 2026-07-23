@@ -24,10 +24,10 @@ The application lives at the repository root rather than under `src/`.
 ## Product surfaces
 
 - `/onboarding` — AI-assisted Decision Report onboarding with bounded live generation, durable revisions, metric/prediction activation, and a safe editable fallback
-- `/reports` — saved reports and future Decision Report home
-- `/actions` — decisions, predictions, actions, levers, drift, and scorecards
-- `/data-workshop` — core-metric inventory and the current CSV input affordance
-- `/impact` — causal impact readouts
+- `/reports` — saved Decision Reports with recoverable removal from visible history
+- `/actions` — report Decision Summary, expandable actions, manual completion, levers, drift, and scorecards
+- `/data-workshop` — named daily CSV import plus the workspace metric catalog and core selection
+- `/impact` — causal readouts plus clearly labeled preliminary descriptive evidence when history is short
 
 ## Local development
 
@@ -53,6 +53,14 @@ Slice 3 completes required gaps without another model call. The report shows at 
 Slice 4 makes the report durable. An explicit **Save draft**, **Save report**, or **Save changes** action writes a scope-bound full snapshot to append-only revisions, updates the URL with the stable report ID, and restores the exact report and metric projection on reload. Identical retries reuse the current revision and stale tabs receive a conflict instead of overwriting newer work. The validated `ReportActivationInputV1` handoff is defined but deliberately inert: saving a report creates no canonical decisions, predictions, actions, decision-action edges, or levers.
 
 Slice 5 activates one exact reviewed revision. After saving a complete report, the user confirms an existing workspace metric, enters the human prediction direction/magnitude/resolution date, and selects one to three report actions. One checked database transaction creates one decision, one prediction, the selected planned manual actions, their decision links, and an append-only activation audit row. Identical retries return the same IDs; changed retries fail with HTTP 409. Activation creates no lever, causal edge, evidence object, tracker ticket, or impact claim. The active report becomes read-only and opens directly in **Actions & Decisions**. Report-created actions use UUID identities and a `Planned` label rather than pretending to be GitHub PRs.
+
+Slices 6–8 carry that exact activated revision across the dashboard, ingest strict daily CSV data,
+and support one sanitized private PNG/JPEG on an editable durable report. Workspace metrics can be
+created from named CSV imports and independently selected for shared dashboards without changing
+the report's confirmed prediction metric. Report actions can be manually completed with an audit
+date/explanation, removed reports are soft-deleted from visible history, and action flags use stable
+`D1A1` coordinates. Short-history before/after evidence is labeled descriptive; authoritative ITS
+belief still requires at least 45 days on both sides.
 
 To exercise the Slice 5 handoff locally, start Supabase and apply migrations before opening the app:
 

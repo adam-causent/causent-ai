@@ -18,6 +18,7 @@ type MetricRow = {
   unit: string | null;
   source: string;
   granularity: string;
+  is_core: boolean;
 };
 type ObsRow = { metric_id: string; obs_date: string; value: number | string | null };
 
@@ -26,7 +27,12 @@ type ObsRow = { metric_id: string; obs_date: string; value: number | string | nu
  * slug; the graph (nodes/edges) keys by metric_id, so callers that join readouts
  * (actions, impact) need both.
  */
-export type MetricRecord = { metricId: string; metric: Metric; configured: boolean };
+export type MetricRecord = {
+  metricId: string;
+  metric: Metric;
+  configured: boolean;
+  isCore: boolean;
+};
 
 /**
  * All metrics in the demo scope (UI Metric + DB metric_id), ordered to match the UI's
@@ -40,7 +46,7 @@ export const getMetricRecords = cache(async function getMetricRecords(): Promise
 
   const metricsRes = await sb
     .from("metrics")
-    .select("metric_id, name, unit, source, granularity")
+    .select("metric_id, name, unit, source, granularity, is_core")
     .eq("scope_id", DEMO_SCOPE_ID);
   if (metricsRes.error) throw metricsRes.error;
   const metricRows = (metricsRes.data ?? []) as MetricRow[];
@@ -88,6 +94,7 @@ export const getMetricRecords = cache(async function getMetricRecords(): Promise
     records.push({
       metricId: row.metric_id,
       configured: configured !== null,
+      isCore: row.is_core === true,
       metric: {
         id: cfg.id,
         name: row.name,

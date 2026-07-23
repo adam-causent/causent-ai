@@ -1,10 +1,16 @@
 import Link from "next/link";
 import { loadDashboardData } from "@/lib/data/dashboard";
 import { Panel } from "@/components/ui/Panel";
-import { CsvDropzone } from "@/components/data-workshop/CsvDropzone";
 import { ConnectedMetrics } from "@/components/data-workshop/ConnectedMetrics";
-import { PlusIcon } from "@/components/ui/icons";
+import { WorkspaceMetricCatalog } from "@/components/data-workshop/WorkspaceMetricCatalog";
+import { WorkspaceMetricCsvDropzone } from "@/components/data-workshop/WorkspaceMetricCsvDropzone";
 import { summarizeMetricConnections } from "@/lib/data/metric-connections";
+import { getSession } from "@/lib/auth/session";
+import { loadReportActivationMetrics } from "@/lib/decision-reports/materialization";
+import { getServerSupabase } from "@/lib/supabase-server";
+
+// The workspace catalog is session-scoped and must never be prerendered at build time.
+export const dynamic = "force-dynamic";
 
 function ProgressRing({ value, cap }: { value: number; cap: number }) {
   const r = 20;
@@ -47,24 +53,27 @@ export default async function DataWorkshopPage({
   const returnTo = requestedReturn && /^\/onboarding\?report=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedReturn)
     ? requestedReturn
     : null;
-  const { metrics, activeDecisionReport } = await loadDashboardData();
+  const [{ metrics, activeDecisionReport }, session, sb] = await Promise.all([
+    loadDashboardData(),
+    getSession(),
+    getServerSupabase(),
+  ]);
+  const workspaceMetrics = await loadReportActivationMetrics(sb, session.workspaceId).catch(() => []);
+  const removableMetricIdByName = Object.fromEntries(
+    workspaceMetrics.filter((metric) => metric.isCore).map((metric) => [metric.name, metric.metricId]),
+  );
+  const lockedMetricName = workspaceMetrics.find(
+    (metric) => metric.metricId === activeDecisionReport?.metricId && !metric.isCore,
+  )?.name ?? null;
   const metricConnections = activeDecisionReport
     ? {
         connected: metrics.filter((metric) => metric.series.length > 0).length,
-        total: 1,
+        total: metrics.length,
       }
     : summarizeMetricConnections(metrics.length);
 
   return (
     <div className="mx-auto flex max-w-[1360px] flex-col gap-4 p-5">
-      {activeDecisionReport ? (
-        <div className="rounded-xl border border-teal-200 bg-teal-50/70 px-4 py-3">
-          <p className="text-[12px] font-semibold text-teal-950">{activeDecisionReport.title}</p>
-          <p className="mt-0.5 text-[11px] leading-5 text-teal-900/75">
-            This project shows only the metric confirmed when the Decision Report was activated.
-          </p>
-        </div>
-      ) : null}
       {returnTo ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-teal-200 bg-teal-50/70 px-4 py-3">
           <div>
@@ -81,13 +90,31 @@ export default async function DataWorkshopPage({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_340px]">
         <div className="space-y-4">
           <Panel>
-            <CsvDropzone
-              enabled={Boolean(activeDecisionReport)}
-              metricName={activeDecisionReport?.metricProjection.metricName}
+            <WorkspaceMetricCsvDropzone
+              activeMetricName={activeDecisionReport?.metricProjection.metricName ?? null}
             />
           </Panel>
           <Panel>
-            <ConnectedMetrics metrics={metrics} connectionSummary={metricConnections} />
+            {activeDecisionReport ? (
+              <>
+                <ConnectedMetrics metrics={metrics} connectionSummary={metricConnections} removableMetricIdByName={removableMetricIdByName} lockedMetricName={lockedMetricName} />
+                <div className="mt-5 border-t border-[var(--border)] pt-5">
+                  <WorkspaceMetricCatalog
+                    metrics={workspaceMetrics}
+                    activeMetricId={activeDecisionReport.metricId}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <ConnectedMetrics metrics={metrics} connectionSummary={metricConnections} removableMetricIdByName={removableMetricIdByName} lockedMetricName={lockedMetricName} />
+                <div className="mt-5 border-t border-[var(--border)] pt-5">
+                  <WorkspaceMetricCatalog
+                    metrics={workspaceMetrics}
+                  />
+                </div>
+              </>
+            )}
           </Panel>
         </div>
 
@@ -131,14 +158,6 @@ export default async function DataWorkshopPage({
           ) : null}
         </div>
 
-        <button className="mt-4 flex w-full flex-col items-center gap-0.5 rounded-lg border border-dashed border-[var(--border-strong)] py-3 text-[var(--brand-blue)] hover:bg-black/[0.02]">
-          <span className="flex items-center gap-1.5 text-[13px] font-medium">
-            <PlusIcon size={14} /> Add / Layer Metric
-          </span>
-          <span className="text-[11px] text-[var(--text-subtle)]">
-            {metricConnections.connected} of {metricConnections.total} connected
-          </span>
-        </button>
         </Panel>
       </div>
     </div>

@@ -9,6 +9,7 @@
 // Component — pass the returned plain data down as props instead.
 
 import { cache } from "react";
+import { unstable_rethrow } from "next/navigation";
 import type {
   Action,
   Decision,
@@ -30,6 +31,7 @@ import {
   type DashboardDecisionReport,
 } from "@/lib/data/decision-reports";
 import { selectReportProjectView } from "@/lib/data/report-project-view";
+import { numberDecisionActions } from "@/lib/data/action-numbering";
 import * as seed from "@/lib/seed";
 
 /** The 30-day-ish reporting window shown in the drawer/impact headers. */
@@ -126,14 +128,35 @@ export const loadDashboardData = cache(async function loadDashboardData(): Promi
       aggregatedImpact,
       impactByMetric,
     });
+    const selectedCoreMetrics = metricRecords
+      .filter((record) => record.isCore)
+      .map((record) => record.metric);
+    const reportAndCoreMetrics = [
+      ...project.metrics,
+      ...selectedCoreMetrics.filter(
+        (metric) => !project.metrics.some((reportMetric) => reportMetric.id === metric.id),
+      ),
+    ];
+    const dashboardMetrics = selectedCoreMetrics.length > 0
+      ? project.activeReport
+        ? reportAndCoreMetrics
+        : selectedCoreMetrics
+      : project.activeReport
+        ? project.metrics
+        : metricRecords.filter((record) => record.configured).map((record) => record.metric);
+    const numberedActions = numberDecisionActions(
+      project.decisions,
+      project.actions,
+      project.activeReport?.report ?? null,
+    );
     return {
       scope,
-      // Unknown names are valid for report-native metrics, but the no-report
-      // dashboard remains the exact legacy configured catalog.
-      metrics: project.activeReport
-        ? project.metrics
-        : metricRecords.filter((record) => record.configured).map((record) => record.metric),
-      actions: project.actions,
+      // Direct core-metric selection is the shared dashboard surface. When a
+      // report is active, its confirmed metric stays first while selected core
+      // metrics are added for the drawer and other tabs; report-owned actions
+      // and impact remain isolated below.
+      metrics: dashboardMetrics,
+      actions: numberedActions,
       decisions: project.decisions,
       aggregatedImpact: project.aggregatedImpact,
       impactByMetric: project.impactByMetric,
@@ -147,6 +170,10 @@ export const loadDashboardData = cache(async function loadDashboardData(): Promi
       source: "db",
     };
   } catch (err) {
+    // Next's request-time APIs (cookies/headers) use internal control-flow
+    // errors during prerender. They are not Supabase failures and must remain
+    // visible to Next so the route is correctly deferred to request time.
+    unstable_rethrow(err);
     console.error(
       "[dashboard] Supabase read failed — serving seed fallback so the app stays up:",
       err,

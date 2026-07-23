@@ -12,6 +12,7 @@ import type { DecisionReportPersistenceStatus } from "@/lib/decision-reports/per
 import type { DecisionReportActivationPointer } from "@/lib/decision-reports/persistence";
 import type { ReportActivationMetric } from "@/lib/decision-reports/materialization";
 import type { DecisionReportV1, MetricProjection } from "@/lib/decision-reports/schema";
+import type { ReportAssetView } from "@/lib/decision-reports/assets";
 
 type GeneratedReport = Extract<
   GenerateDecisionReportActionResult,
@@ -30,6 +31,7 @@ export type InitialSavedDecisionReport = {
     savedAt: string;
     activation: DecisionReportActivationPointer | null;
   };
+  asset: ReportAssetView | null;
 };
 
 type ReportDraft = {
@@ -44,6 +46,7 @@ type ReportDraft = {
     totalTokens: number | null;
   };
   persistence?: InitialSavedDecisionReport["persistence"];
+  asset?: ReportAssetView | null;
 };
 
 export function DecisionReportOnboarding({
@@ -97,6 +100,7 @@ export function DecisionReportOnboarding({
           projectName={draft.projectName}
           generationMeta={draft.generationMeta}
           initialPersistence={draft.persistence}
+          initialAsset={draft.asset ?? null}
           activationMetrics={activationMetrics}
           onStartOver={() => {
             setDraft(null);

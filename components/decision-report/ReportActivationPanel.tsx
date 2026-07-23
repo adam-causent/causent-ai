@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition, type FormEvent } from "react";
 
 import { activateDecisionReportAction } from "@/app/(onboarding)/onboarding/decision-report-activation-actions";
+import { CoreMetricToggle } from "@/components/data-workshop/CoreMetricToggle";
 import type { ReportActivationMetric } from "@/lib/decision-reports/materialization";
 import type {
   DecisionReportActivationPointer,
@@ -18,6 +19,35 @@ type ActivationPersistence = {
   status: DecisionReportPersistenceStatus;
   activation: DecisionReportActivationPointer | null;
 };
+
+function DashboardCoreMetricSelector({ metrics }: { metrics: ReportActivationMetric[] }) {
+  if (metrics.length === 0) return null;
+  return (
+    <section className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg)]/50 p-3" aria-labelledby="onboarding-core-metrics">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <h3 id="onboarding-core-metrics" className="text-[12px] font-semibold text-[var(--text)]">
+            Dashboard Core Metrics
+          </h3>
+          <p className="mt-0.5 text-[10px] leading-4 text-[var(--text-muted)]">
+            Add up to five. These appear across dashboard tabs and in the bottom drawer.
+          </p>
+        </div>
+        <span className="text-[10px] font-medium text-[var(--text-subtle)]">
+          {metrics.filter((metric) => metric.isCore).length}/5 selected
+        </span>
+      </div>
+      <ul className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {metrics.map((metric) => (
+          <li key={metric.metricId} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-white px-3 py-2">
+            <span className="min-w-0 truncate text-[11px] font-medium text-[var(--text)]">{metric.name}</span>
+            <CoreMetricToggle metricId={metric.metricId} selected={metric.isCore} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 export function ReportActivationPanel({
   report,
@@ -66,6 +96,7 @@ export function ReportActivationPanel({
             Open Actions &amp; Decisions
           </Link>
         </div>
+        <DashboardCoreMetricSelector metrics={metrics} />
       </section>
     );
   }
@@ -146,10 +177,12 @@ export function ReportActivationPanel({
         </span>
       </div>
 
+      <DashboardCoreMetricSelector metrics={metrics} />
+
       <form className="mt-4 grid gap-3 xl:grid-cols-3" onSubmit={activate}>
         <fieldset className="rounded-xl border border-[var(--border)] p-3" disabled={!exactSavedRevision || isPending}>
           <legend className="px-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-subtle)]">
-            1 · Confirm the metric
+            1 · Confirm the prediction metric
           </legend>
           <p className="mt-1 text-[12px] font-medium text-[var(--text)]">
             Report hypothesis: {projection.metricName}
@@ -175,11 +208,14 @@ export function ReportActivationPanel({
               <p className="mt-2 text-[10px] leading-4 text-[var(--text-subtle)]">
                 The report&apos;s illustrative 40% and 55% values are not imported as observations.
               </p>
+              <p className="mt-2 text-[10px] leading-4 text-[var(--text-subtle)]">
+                This single metric owns the report prediction. Dashboard Core Metrics above are a separate multi-select.
+              </p>
             </>
           ) : (
             <div className="mt-3 rounded-lg border border-dashed border-amber-300 bg-amber-50/50 p-3">
               <p className="text-[11px] leading-5 text-amber-900">
-                No core metric is available in this workspace yet.
+                No workspace metric is available yet.
               </p>
             </div>
           )}
@@ -187,7 +223,7 @@ export function ReportActivationPanel({
             href={`/data-workshop${persistence ? `?returnTo=${encodeURIComponent(`/onboarding?report=${persistence.reportId}`)}` : ""}`}
             className="mt-3 inline-flex text-[11px] font-semibold text-[var(--brand-blue)] underline-offset-2 hover:underline"
           >
-            {metrics.length === 0 ? "Add a core metric in Data Workshop →" : "Manage metrics in Data Workshop →"}
+            {metrics.length === 0 ? "Import a metric in Data Workshop →" : "Manage metrics in Data Workshop →"}
           </Link>
         </fieldset>
 

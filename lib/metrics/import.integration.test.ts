@@ -5,9 +5,16 @@ import path from "node:path";
 import { after, before, test, type TestContext } from "node:test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { GUMMY_ALPHA_GOLDEN_EXAMPLE } from "../decision-reports/fixtures/gummy-alpha.ts";
-import { materializeReportActivation } from "../decision-reports/materialization.ts";
+import {
+  loadReportActivationMetrics,
+  materializeReportActivation,
+} from "../decision-reports/materialization.ts";
 import { saveDecisionReport } from "../decision-reports/persistence.ts";
-import { importReportMetricObservations } from "./import.ts";
+import {
+  importReportMetricObservations,
+  importWorkspaceMetricCsv,
+  setWorkspaceCoreMetric,
+} from "./import.ts";
 
 function localEnv(): Record<string, string> {
   try {
@@ -124,5 +131,101 @@ test("rejects forged report, metric, and cross-workspace combinations with no fo
     if (!result.ok) assert.equal(result.code, "forbidden");
   }
   const foreign = await sb.from("metric_observations").select("obs_date").eq("metric_id", OTHER_METRIC);
+  assert.equal(foreign.data?.length, 0);
+});
+
+test("creates a named workspace CSV metric, shows it as selectable data, and retries safely", async (t) => {
+  if (!gated(t) || !sb) return;
+  const observations = [
+    { date: "2026-07-20", value: 0.41 },
+    { date: "2026-07-21", value: 0.43 },
+  ];
+  const first = await importWorkspaceMetricCsv(sb, {
+    scopeId: WORKSPACE,
+    name: "AI assistant adoption rate",
+    unit: "percent",
+    observations,
+    authoredBy: null,
+  });
+  assert.equal(first.ok, true, first.ok ? undefined : first.error);
+  if (!first.ok) return;
+  assert.equal(first.summary.created, true);
+  assert.equal(first.summary.insertedRows, 2);
+
+  const catalog = await sb
+    .from("metrics")
+    .select("metric_id, name, source, unit")
+    .eq("scope_id", WORKSPACE)
+    .ilike("name", "AI assistant adoption rate")
+    .single();
+  assert.equal(catalog.error, null, catalog.error?.message);
+  assert.equal(catalog.data?.source, "csv");
+  assert.equal(catalog.data?.unit, "percent");
+
+  const retry = await importWorkspaceMetricCsv(sb, {
+    scopeId: WORKSPACE,
+    name: "AI assistant adoption rate",
+    unit: "percent",
+    observations: [{ ...observations[0], value: 0.44 }, observations[1]],
+    authoredBy: null,
+  });
+  assert.equal(retry.ok, true, retry.ok ? undefined : retry.error);
+  if (!retry.ok) return;
+  assert.equal(retry.summary.created, false);
+  assert.equal(retry.summary.insertedRows, 0);
+  assert.equal(retry.summary.updatedRows, 2);
+
+  const rows = await sb
+    .from("metric_observations")
+    .select("obs_date, value")
+    .eq("metric_id", catalog.data?.metric_id)
+    .order("obs_date");
+  assert.equal(rows.data?.length, 2);
+  assert.equal(Number(rows.data?.[0].value), 0.44);
+
+  const activationMetrics = await loadReportActivationMetrics(sb, WORKSPACE);
+  const catalogMetric = activationMetrics.find((metric) => metric.metricId === catalog.data?.metric_id);
+  assert.equal(catalogMetric?.name, "AI assistant adoption rate");
+  assert.equal(catalogMetric?.hasObservations, true);
+
+  const selected = await setWorkspaceCoreMetric(sb, {
+    scopeId: WORKSPACE,
+    metricId: catalog.data!.metric_id,
+    isCore: true,
+    authoredBy: null,
+  });
+  assert.equal(selected.ok, true, selected.ok ? undefined : selected.error);
+  if (selected.ok) assert.equal(selected.coreMetricCount, 1);
+  const selectedCatalog = await loadReportActivationMetrics(sb, WORKSPACE);
+  assert.equal(selectedCatalog.find((metric) => metric.metricId === catalog.data?.metric_id)?.isCore, true);
+
+  const removed = await setWorkspaceCoreMetric(sb, {
+    scopeId: WORKSPACE,
+    metricId: catalog.data!.metric_id,
+    isCore: false,
+    authoredBy: null,
+  });
+  assert.equal(removed.ok, true, removed.ok ? undefined : removed.error);
+  if (removed.ok) assert.equal(removed.coreMetricCount, 0);
+});
+
+test("workspace metric import rejects a missing workspace before writing", async (t) => {
+  if (!gated(t) || !sb) return;
+  for (const scopeId of [randomUUID()]) {
+    const result = await importWorkspaceMetricCsv(sb, {
+      scopeId,
+      name: "Should not be written",
+      unit: "count",
+      observations: [{ date: "2026-07-22", value: 1 }],
+      authoredBy: null,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "forbidden");
+  }
+  const foreign = await sb
+    .from("metrics")
+    .select("metric_id")
+    .eq("scope_id", OTHER_WORKSPACE)
+    .ilike("name", "Should not be written");
   assert.equal(foreign.data?.length, 0);
 });

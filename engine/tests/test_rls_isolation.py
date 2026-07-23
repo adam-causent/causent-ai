@@ -22,6 +22,7 @@ Nothing here weakens an assertion to make the suite pass; a real leak fails the 
 from __future__ import annotations
 
 import contextlib
+import datetime
 import json
 import uuid
 
@@ -82,6 +83,8 @@ REPORT_REVISION_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000e6")
 REPORT_REVISION_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000f6")
 ACTIVATION_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000e7")
 ACTIVATION_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000f7")
+REPORT_ASSET_A = uuid.UUID("aaaa0000-0000-0000-0000-0000000000e8")
+REPORT_ASSET_B = uuid.UUID("bbbb0000-0000-0000-0000-0000000000f8")
 
 ALL_USERS = (USER_A, USER_B, USER_A_VIEWER)
 
@@ -109,6 +112,8 @@ DOMAIN_TABLES = [
     ("public.decision_reports", "scope_id", WS_A, WS_B),
     ("public.decision_report_revisions", "scope_id", WS_A, WS_B),
     ("public.decision_report_activations", "scope_id", WS_A, WS_B),
+    ("public.report_assets", "scope_id", WS_A, WS_B),
+    ("public.decision_report_rollouts", "user_id", USER_A, USER_B),
 ]
 
 # Hierarchy / spine tables also carry tenant identity and must isolate too.
@@ -177,6 +182,11 @@ def _seed(conn: psycopg.Connection) -> None:
             "insert into public.memberships (user_id, org_id, role) values "
             "(%s,%s,'member'),(%s,%s,'member'),(%s,%s,'viewer')",
             (USER_A, ORG_A, USER_B, ORG_B, USER_A_VIEWER, ORG_A),
+        )
+        cur.execute(
+            "insert into public.decision_report_rollouts (scope_id, user_id, enabled, rollout_note) values "
+            "(%s,%s,true,'partner A enabled'),(%s,%s,false,'partner B rollback')",
+            (WS_A, USER_A, WS_B, USER_B),
         )
 
         # one row in every domain table, per org, under that org's workspace
@@ -292,6 +302,18 @@ def _seed(conn: psycopg.Connection) -> None:
             (
                 REPORT_A, REPORT_REVISION_A, REPORT_B, REPORT_REVISION_B,
                 REPORT_A, REPORT_B,
+            ),
+        )
+        cur.execute(
+            "insert into public.report_assets "
+            "(asset_id, report_id, scope_id, reserved_revision_id, attached_revision_id, object_path, media_type, byte_size, width, height, content_hash, status) values "
+            "(%s,%s,%s,%s,%s,%s,'image/png',100,10,10,%s,'attached'),"
+            "(%s,%s,%s,%s,%s,%s,'image/png',100,10,10,%s,'attached')",
+            (
+                REPORT_ASSET_A, REPORT_A, WS_A, REPORT_REVISION_A, REPORT_REVISION_A,
+                f"{WS_A}/{REPORT_A}/{REPORT_ASSET_A}.png", "e" * 64,
+                REPORT_ASSET_B, REPORT_B, WS_B, REPORT_REVISION_B, REPORT_REVISION_B,
+                f"{WS_B}/{REPORT_B}/{REPORT_ASSET_B}.png", "f" * 64,
             ),
         )
         cur.execute(
@@ -539,6 +561,15 @@ def test_prospective_logs_are_append_only(seeded):
             conn.rollback()
 
 
+def test_report_asset_bytes_require_member_rank(seeded):
+    with as_user(USER_A_VIEWER) as conn, conn.cursor() as cur:
+        cur.execute("select count(*) from public.report_assets where asset_id=%s", (REPORT_ASSET_A,))
+        assert cur.fetchone()[0] == 0
+    with as_user(USER_A) as conn, conn.cursor() as cur:
+        cur.execute("select count(*) from public.report_assets where asset_id=%s", (REPORT_ASSET_A,))
+        assert cur.fetchone()[0] == 1
+
+
 # ============================================================================
 # GATE 7 — Decision Report Slice 4 persistence boundary
 # ============================================================================
@@ -624,6 +655,33 @@ def test_report_rpc_denies_viewer_and_cross_tenant_member(seeded):
             conn.rollback()
 
 
+def test_report_assets_are_member_scoped_and_viewer_or_cross_tenant_denied(seeded):
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute("select asset_id from public.report_assets where asset_id=%s", (REPORT_ASSET_A,))
+        assert cur.fetchone()[0] == REPORT_ASSET_A
+        cur.execute("select count(*) from public.report_assets where asset_id=%s", (REPORT_ASSET_B,))
+        assert cur.fetchone()[0] == 0
+        conn.rollback()
+
+    with as_user(USER_A_VIEWER, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute("select count(*) from public.report_assets where asset_id=%s", (REPORT_ASSET_A,))
+        assert cur.fetchone()[0] == 0
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "select * from public.reserve_decision_report_asset_v1(%s,%s,'png',%s)",
+                (REPORT_A, REPORT_REVISION_A, USER_A_VIEWER),
+            )
+        conn.rollback()
+
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "select * from public.reserve_decision_report_asset_v1(%s,%s,'png',%s)",
+                (REPORT_B, REPORT_REVISION_B, USER_A),
+            )
+        conn.rollback()
+
+
 def test_report_tables_are_read_only_and_revisions_append_only(seeded):
     statements = [
         ("insert into public.decision_reports (scope_id,title) values (%s,'blocked')", (WS_A,)),
@@ -637,6 +695,85 @@ def test_report_tables_are_read_only_and_revisions_append_only(seeded):
             with pytest.raises(pgerr.InsufficientPrivilege):
                 cur.execute(statement, params)
             conn.rollback()
+
+
+def test_rollout_assignments_are_self_readable_and_operator_managed(seeded):
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute(
+            "select enabled from public.decision_report_rollouts where scope_id=%s and user_id=%s",
+            (WS_A, USER_A),
+        )
+        assert cur.fetchone() == (True,)
+        cur.execute(
+            "select count(*) from public.decision_report_rollouts where user_id=%s",
+            (USER_B,),
+        )
+        assert cur.fetchone()[0] == 0
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "update public.decision_report_rollouts set enabled=false where scope_id=%s and user_id=%s",
+                (WS_A, USER_A),
+            )
+        conn.rollback()
+
+
+def test_member_soft_deletes_non_active_report_and_retry_reuses(seeded):
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute(
+            "select report_id, revision_id from public.create_decision_report_v1("
+            "%s,%s,'report_ready',%s::jsonb,%s::jsonb,%s)",
+            (WS_A, READY_REPORT["title"], json.dumps(READY_REPORT),
+             json.dumps(READY_PROJECTION), USER_A),
+        )
+        report_id, revision_id = cur.fetchone()
+        cur.execute(
+            "select report_id, reused from public.delete_decision_report_v1(%s,%s,%s)",
+            (WS_A, report_id, USER_A),
+        )
+        assert cur.fetchone() == (report_id, False)
+        cur.execute(
+            "select report_id, reused from public.delete_decision_report_v1(%s,%s,%s)",
+            (WS_A, report_id, USER_A),
+        )
+        assert cur.fetchone() == (report_id, True)
+        cur.execute("select count(*) from public.decision_reports where report_id=%s", (report_id,))
+        assert cur.fetchone()[0] == 0
+        cur.execute(
+            "select count(*) from public.decision_report_revisions where revision_id=%s",
+            (revision_id,),
+        )
+        assert cur.fetchone()[0] == 0
+        conn.rollback()
+
+
+def test_report_delete_denies_viewer_and_cross_tenant_member(seeded):
+    for user_id, scope_id, report_id in (
+        (USER_A_VIEWER, WS_A, REPORT_A),
+        (USER_A, WS_A, REPORT_B),
+    ):
+        with as_user(user_id, autocommit=False) as conn, conn.cursor() as cur:
+            with pytest.raises(psycopg.Error):
+                cur.execute(
+                    "select * from public.delete_decision_report_v1(%s,%s,%s)",
+                    (scope_id, report_id, user_id),
+                )
+            conn.rollback()
+
+
+def test_active_report_can_leave_history_without_deleting_graph_audit(seeded):
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute(
+            "select report_id, reused from public.delete_decision_report_v1(%s,%s,%s)",
+            (WS_A, REPORT_A, USER_A),
+        )
+        assert cur.fetchone() == (REPORT_A, False)
+        cur.execute("select count(*) from public.decision_reports where report_id=%s", (REPORT_A,))
+        assert cur.fetchone()[0] == 0
+        cur.execute("select count(*) from public.decisions where decision_id=%s", (DECISION_A,))
+        assert cur.fetchone()[0] == 1
+        cur.execute("select count(*) from public.actions where action_id=%s", (ACTION_A,))
+        assert cur.fetchone()[0] == 1
+        conn.rollback()
 
 
 def test_member_activates_reviewed_report_once_and_retry_reuses(seeded):
@@ -780,6 +917,58 @@ def test_active_report_metric_import_rejects_viewer_and_cross_workspace(seeded):
             conn.rollback()
 
 
+def test_workspace_core_metric_selection_is_member_only_and_scope_bound(seeded):
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute(
+            "select selected_metric_id,is_core,core_metric_count "
+            "from public.set_workspace_core_metric_v1(%s,%s,true,%s)",
+            (WS_A, METRIC_A, USER_A),
+        )
+        assert cur.fetchone() == (METRIC_A, True, 1)
+        cur.execute(
+            "select selected_metric_id,is_core,core_metric_count "
+            "from public.set_workspace_core_metric_v1(%s,%s,false,%s)",
+            (WS_A, METRIC_A, USER_A),
+        )
+        assert cur.fetchone() == (METRIC_A, False, 0)
+        conn.rollback()
+
+    for user_id, scope_id, metric_id, actor_id in (
+        (USER_A_VIEWER, WS_A, METRIC_A, USER_A_VIEWER),
+        (USER_A, WS_B, METRIC_B, USER_A),
+    ):
+        with as_user(user_id, autocommit=False) as conn, conn.cursor() as cur:
+            with pytest.raises(pgerr.InsufficientPrivilege):
+                cur.execute(
+                    "select * from public.set_workspace_core_metric_v1(%s,%s,true,%s)",
+                    (scope_id, metric_id, actor_id),
+                )
+            conn.rollback()
+
+
+def test_workspace_core_metric_selection_enforces_five_metric_cap(seeded):
+    metric_ids = [uuid.uuid4() for _ in range(6)]
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        for index, metric_id in enumerate(metric_ids):
+            cur.execute(
+                "insert into public.metrics (metric_id,scope_id,name,source,granularity) "
+                "values (%s,%s,%s,'csv','daily')",
+                (metric_id, WS_A, f"core-{index}"),
+            )
+        for metric_id in metric_ids[:5]:
+            cur.execute(
+                "select core_metric_count from public.set_workspace_core_metric_v1(%s,%s,true,%s)",
+                (WS_A, metric_id, USER_A),
+            )
+        assert cur.fetchone()[0] == 5
+        with pytest.raises(pgerr.InvalidParameterValue):
+            cur.execute(
+                "select * from public.set_workspace_core_metric_v1(%s,%s,true,%s)",
+                (WS_A, metric_ids[5], USER_A),
+            )
+        conn.rollback()
+
+
 def test_actions_source_accepts_jira_rejects_unknown(seeded):
     # The widened CHECK admits 'jira' and still rejects a bogus value.
     with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
@@ -795,6 +984,61 @@ def test_actions_source_accepts_jira_rejects_unknown(seeded):
                 (WS_A,),
             )
         conn.rollback()
+
+
+def test_manual_report_action_completion_is_member_only_scoped_and_idempotent(seeded):
+    action_id = uuid.UUID("aaaa0000-0000-0000-0000-0000000000cb")
+    rationale = json.dumps({
+        "type": "doc",
+        "content": [],
+        "meta": {"source": "decision_report", "source_item_id": "manual-test"},
+    })
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute(
+            "insert into public.actions (action_id,scope_id,source,status,rationale_richtext) "
+            "values (%s,%s,'manual','planned',%s::jsonb)",
+            (action_id, WS_A, rationale),
+        )
+        cur.execute(
+            "select completed_on, explanation, reused from public.complete_manual_action_v1("
+            "%s,%s,date '2026-07-22','Shipped outside the tracker.',%s)",
+            (WS_A, action_id, USER_A),
+        )
+        assert cur.fetchone() == (
+            datetime.date(2026, 7, 22),
+            "Shipped outside the tracker.",
+            False,
+        )
+        cur.execute(
+            "select completed_on, explanation, reused from public.complete_manual_action_v1("
+            "%s,%s,date '2026-07-22','Shipped outside the tracker.',%s)",
+            (WS_A, action_id, USER_A),
+        )
+        assert cur.fetchone()[2] is True
+        cur.execute(
+            "select effective_date,status,rationale_richtext #>> '{meta,manual_completion,explanation}' "
+            "from public.actions where action_id=%s",
+            (action_id,),
+        )
+        assert cur.fetchone() == (
+            datetime.date(2026, 7, 22),
+            "complete",
+            "Shipped outside the tracker.",
+        )
+        conn.rollback()
+
+    for user_id, scope_id, target_action, actor_id in (
+        (USER_A_VIEWER, WS_A, ACTION_A, USER_A_VIEWER),
+        (USER_A, WS_B, ACTION_B, USER_A),
+    ):
+        with as_user(user_id, autocommit=False) as conn, conn.cursor() as cur:
+            with pytest.raises(pgerr.InsufficientPrivilege):
+                cur.execute(
+                    "select * from public.complete_manual_action_v1("
+                    "%s,%s,date '2026-07-22','Not allowed.',%s)",
+                    (scope_id, target_action, actor_id),
+                )
+            conn.rollback()
 
 
 # ============================================================================

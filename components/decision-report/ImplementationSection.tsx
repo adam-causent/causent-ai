@@ -1,5 +1,7 @@
 import { ClaimEditor, ClaimListEditor } from "@/components/decision-report/ClaimEditor";
 import { ReportSection } from "@/components/decision-report/ReportSection";
+import { SuppliedMockup } from "@/components/decision-report/SuppliedMockup";
+import type { ReportAssetView } from "@/lib/decision-reports/assets";
 import type { DecisionReportV1 } from "@/lib/decision-reports/schema";
 
 type GovernanceValue = DecisionReportV1["implementation"]["governance"]["dataClassification"];
@@ -12,6 +14,12 @@ export function ImplementationSection({
   onActionSummaryChange,
   onActionOwnerChange,
   onDataClassificationChange,
+  asset,
+  assetPending,
+  assetDisabled,
+  assetError,
+  onAssetUpload,
+  onAssetRemove,
 }: {
   implementation: DecisionReportV1["implementation"];
   readOnly?: boolean;
@@ -20,6 +28,12 @@ export function ImplementationSection({
   onActionSummaryChange: (sourceItemId: string, text: string) => void;
   onActionOwnerChange: (sourceItemId: string, text: string) => void;
   onDataClassificationChange: (value: GovernanceValue) => void;
+  asset: ReportAssetView | null;
+  assetPending: boolean;
+  assetDisabled: boolean;
+  assetError: string | null;
+  onAssetUpload: (file: File) => void;
+  onAssetRemove: () => void;
 }) {
   return (
     <ReportSection
@@ -136,16 +150,7 @@ export function ImplementationSection({
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
-        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-            Supplied mock-up · optional
-          </p>
-          <div className="mt-3 flex min-h-28 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-white/70 px-4 text-center">
-            <p className="max-w-xs text-[12px] leading-5 text-[var(--text-muted)]">
-              No mock-up supplied. This remains visible so the report never implies that one was generated or reviewed.
-            </p>
-          </div>
-        </div>
+        <SuppliedMockup asset={asset} readOnly={readOnly} disabled={assetDisabled} pending={assetPending} error={assetError} onUpload={onAssetUpload} onRemove={onAssetRemove} />
 
         <div className="rounded-xl border border-[var(--border)] p-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">
