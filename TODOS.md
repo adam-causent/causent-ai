@@ -49,7 +49,7 @@ Goal: help the user finish the partial report without adding chat infrastructure
 - [x] Replace the inert final-review behavior with an explicit ready/not-ready state. Optional customers, stakeholders, owner, governance, and mock-up fields do not block readiness.
 - [x] Add unit tests for gap ordering, optional missing fields, command validation, the three-action ceiling, ID preservation, direct-edit/question parity, and completing the safe fallback to ready.
 - [x] Browser-review the live Gummy Alpha report and the ready-state transition. The review caught and fixed a contradiction where optional owners, customers, and stakeholders appeared required beside a “Decision Report ready” message.
-- [ ] Complete the remaining browser acceptance pass for the sparse safe fallback and keyboard focus before the partner session.
+- [x] Complete the sparse safe-fallback and keyboard-focus browser pass. Slice 9 verified exact-field focus, sequential Tab order, and report readiness without another model request.
 
 Acceptance: the safe fallback can be completed into a report-ready draft; the Gummy Alpha report is already ready or names only real required gaps; direct editing and answering a focused question produce the same validated report state.
 
@@ -188,23 +188,40 @@ Acceptance: completing a report action with at least 14 days of observations on 
 
 Non-goals: automatic engine execution after import/completion, lowering the ITS confidence floor, or attributing an overlapping before/after shift to one action.
 
-### Next — Slice 9 partner rollout and clean-account acceptance
+### Implemented Slice 9 — partner rollout and clean-account acceptance; partner evidence pending
 
 Goal: expose the completed Decision Report journey to controlled partner accounts and prove that a new user can finish it without manual recovery.
 
-- [ ] Add a per-user or per-workspace rollout flag for new Decision Report starts, with the legacy onboarding flow as the explicit rollback path. Do not migrate an in-progress legacy session in place.
-- [ ] Define rollback criteria and verify that disabling new starts does not hide or corrupt already-created Decision Reports.
-- [ ] Run the clean-account browser matrix across generation/fallback, direct edits and focused questions, save/reload, browser Back, supplied-image success/failure, named metric import and multi-select, activation/retry, manual completion, preliminary impact, and flag rollback.
-- [ ] Finish the sparse safe-fallback and keyboard-focus checks left from Slice 3.
-- [ ] Add the remaining Decision Report-specific unsupported-claim cases until at least nine adversarial scenarios pass without an unsupported fact being labeled sourced.
-- [ ] Retain the existing report/asset RLS, Storage, revision, activation, metric, manual-completion, and soft-delete integration coverage in CI.
+- [x] Add an operator-managed per-user rollout assignment for new Decision Report starts. Unassigned users fail closed to legacy; `?flow=legacy` pins an in-progress legacy session across refresh/Back and later enablement.
+- [x] Define and verify rollback: disabling an assignment redirects new and unsaved Decision Report starts to legacy, while direct `?report=<id>` links continue loading durable draft, ready, and active reports unchanged.
+- [x] Run the local clean-state browser matrix across live generation, deterministic fallback, direct edits and focused questions, save/reload, browser Back, supplied-image success/failure, named metric import and selection, activation, manual completion, honest no-evidence Impact, and flag rollback. Retry/idempotency and preliminary descriptive evidence remain covered by their existing integration/regression gates rather than duplicated in the browser.
+- [x] Finish the sparse safe-fallback and keyboard-focus checks left from Slice 3. “Edit in report” focuses the exact missing textarea; Tab order continues through editable controls; focused answers reach ready without another model call.
+- [x] Add nine Decision Report-specific unsupported-claim scenarios. Fabricated decision, background, problem, proof, mechanism, action summary, owner, customer, and stakeholder evidence cannot become `sourced`.
+- [x] Retain the report/asset RLS, Storage, revision, activation, metric, manual-completion, and soft-delete gates. Slice 9 verification passed 24 focused TypeScript/Supabase integration cases and 41 combined primary/adversarial RLS cases.
 - [ ] Run at least three initially unassisted partner sessions; require at least two to pass four of five checks: decision accurate, problem accurate, evidence traceable, metric mechanism plausible, next action usable.
 
-Acceptance: rollout can be enabled and reversed for a controlled scope; a clean account completes the existing report journey without repeated onboarding or manual database repair; already-created reports survive rollback; and the partner gate has recorded evidence rather than inferred readiness.
+Acceptance status: the controlled rollout, rollback, durable-report survival, and local clean-state journey are verified. The product release gate remains open until three real initially unassisted partner sessions are recorded; automated or facilitator-driven runs do not substitute for that evidence.
 
 Slice 9 non-goals: lever-flow redesign, account-level GitHub/Atlassian OAuth, warehouse connectors, automatic causal recomputation, a lower causal confidence floor, hard report deletion/restoration, autosave, revision-history/export UI, URL/PDF ingestion, OCR, or conversational delivery.
 
 Already complete and not Slice 9 work: schema/provenance/gap/edit unit coverage, explicit durable save/reload, retry-safe activation, report-native isolation, private image handling, named CSV metrics, multi-metric selection, manual action completion, report soft deletion, action coordinates/deep links, chart controls, and preliminary descriptive impact rendering.
+
+### Prepared Slice 10 — explicit active-report iterations; gated on partner evidence
+
+Goal: let a user start, review, and activate a linear successor iteration from an active Decision Report without mutating the activated report or its canonical decision, prediction, actions, evidence, or audit rows.
+
+- [ ] Add an explicit report-series identity and checked, retry-safe `active parent -> draft successor` transition. Existing reports backfill as one-iteration series; a non-deleted report may have at most one direct successor.
+- [ ] Seed the successor from the exact activated revision, retain stable claim/action source IDs for unchanged logical items, record a required iteration reason, and remove report-bound `assetIds` so private bytes and object paths are never reused across reports.
+- [ ] Keep the prior active iteration operational while its successor is draft. On successor activation, atomically move the series current pointer to the new active report while preserving every prior canonical row unchanged.
+- [ ] Group iterations in Reports, label current versus historical state, expose **Start next iteration** only on the current active iteration, and keep direct links to every non-deleted iteration.
+- [ ] Make removal semantics explicit: removing a draft successor leaves the current active pointer unchanged; removing the current active successor selects the nearest non-deleted active predecessor or leaves the series without a current report. It must never select a report from another series.
+- [ ] Extend repository, activation, asset, soft-delete, RLS, stale-retry, and browser coverage through at least three sequential iterations, including a rolled-back draft and a current-iteration removal.
+
+Entry condition: prepare the contracts now, but do not implement this conditional production-ramp slice until the Slice 9 partner gate passes or a later explicit product decision overrides that gate.
+
+Acceptance: one active report can create iteration 2, iteration 2 can be edited and activated, and iteration 3 can repeat the cycle. Actions & Decisions, Data Workshop, and Impact resolve only through the series' explicit current active report; Reports retains the readable lineage; parent rows and private assets remain unchanged; exact retries create no duplicate report, revision, activation, or canonical graph rows.
+
+Slice 10 non-goals: branching or merging iteration trees, in-place edits to active reports, rewriting prior decisions/actions/predictions, automatic action cancellation, cross-report asset reuse, revision diff/restore/export UI, general chat, connectors, automatic causal recomputation, or broader ingestion.
 
 Estimated for the current builder profile: 3–5 calendar weeks at 15–25 focused hours per week. First interactive report target: roughly one week. End-to-end partner target: roughly 2–3 weeks.
 

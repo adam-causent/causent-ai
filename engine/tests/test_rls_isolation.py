@@ -113,6 +113,7 @@ DOMAIN_TABLES = [
     ("public.decision_report_revisions", "scope_id", WS_A, WS_B),
     ("public.decision_report_activations", "scope_id", WS_A, WS_B),
     ("public.report_assets", "scope_id", WS_A, WS_B),
+    ("public.decision_report_rollouts", "user_id", USER_A, USER_B),
 ]
 
 # Hierarchy / spine tables also carry tenant identity and must isolate too.
@@ -181,6 +182,11 @@ def _seed(conn: psycopg.Connection) -> None:
             "insert into public.memberships (user_id, org_id, role) values "
             "(%s,%s,'member'),(%s,%s,'member'),(%s,%s,'viewer')",
             (USER_A, ORG_A, USER_B, ORG_B, USER_A_VIEWER, ORG_A),
+        )
+        cur.execute(
+            "insert into public.decision_report_rollouts (scope_id, user_id, enabled, rollout_note) values "
+            "(%s,%s,true,'partner A enabled'),(%s,%s,false,'partner B rollback')",
+            (WS_A, USER_A, WS_B, USER_B),
         )
 
         # one row in every domain table, per org, under that org's workspace
@@ -689,6 +695,26 @@ def test_report_tables_are_read_only_and_revisions_append_only(seeded):
             with pytest.raises(pgerr.InsufficientPrivilege):
                 cur.execute(statement, params)
             conn.rollback()
+
+
+def test_rollout_assignments_are_self_readable_and_operator_managed(seeded):
+    with as_user(USER_A, autocommit=False) as conn, conn.cursor() as cur:
+        cur.execute(
+            "select enabled from public.decision_report_rollouts where scope_id=%s and user_id=%s",
+            (WS_A, USER_A),
+        )
+        assert cur.fetchone() == (True,)
+        cur.execute(
+            "select count(*) from public.decision_report_rollouts where user_id=%s",
+            (USER_B,),
+        )
+        assert cur.fetchone()[0] == 0
+        with pytest.raises(pgerr.InsufficientPrivilege):
+            cur.execute(
+                "update public.decision_report_rollouts set enabled=false where scope_id=%s and user_id=%s",
+                (WS_A, USER_A),
+            )
+        conn.rollback()
 
 
 def test_member_soft_deletes_non_active_report_and_retry_reuses(seeded):

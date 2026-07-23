@@ -132,6 +132,70 @@ test("invented metrics, customers, owners, and numeric claims are removed", () =
   assert.equal(result.report.supportingEvidence.metricMechanism[0].status, "missing");
 });
 
+test("nine Decision Report adversarial claims cannot promote fabricated evidence to sourced", () => {
+  const cases: Array<{
+    name: string;
+    mutate: (generated: ModelDecisionReportDraft) => void;
+    read: (report: ReturnType<typeof materializeModelDecisionReport>["report"]) =>
+      { status: string } | null;
+  }> = [
+    {
+      name: "decision",
+      mutate: (generated) => { generated.decision.decision = claim("Launch globally.", "supported", "The board approved a global launch."); },
+      read: (report) => report.decision.decision[0],
+    },
+    {
+      name: "background",
+      mutate: (generated) => { generated.decision.background = claim("A prior test succeeded.", "supported", "The prior test increased revenue."); },
+      read: (report) => report.decision.background[0],
+    },
+    {
+      name: "problem",
+      mutate: (generated) => { generated.decision.problem = claim("Support volume doubled.", "supported", "Support volume doubled last month."); },
+      read: (report) => report.decision.problem[0],
+    },
+    {
+      name: "proof claim",
+      mutate: (generated) => { generated.supportingEvidence.factors = [claim("Research proves demand.", "supported", "Twelve interviews proved demand.")]; },
+      read: (report) => report.supportingEvidence.factors[0],
+    },
+    {
+      name: "metric mechanism",
+      mutate: (generated) => { generated.supportingEvidence.metricMechanism = claim("Retention will rise.", "supported", "Retention rose in the experiment."); },
+      read: (report) => report.supportingEvidence.metricMechanism[0],
+    },
+    {
+      name: "action summary",
+      mutate: (generated) => { generated.implementation.actionPlanSummary = claim("Legal approved the plan.", "supported", "Legal approved the implementation plan."); },
+      read: (report) => report.implementation.actionPlanSummary[0],
+    },
+    {
+      name: "owner",
+      mutate: (generated) => { generated.implementation.actions[0].owner = claim("Rina", "supported", "Rina owns the launch."); },
+      read: (report) => report.implementation.actions[0].owner,
+    },
+    {
+      name: "customer",
+      mutate: (generated) => { generated.implementation.customers = [claim("Acme Corp", "supported", "Acme Corp requested the feature.")]; },
+      read: (report) => report.implementation.customers[0],
+    },
+    {
+      name: "stakeholder",
+      mutate: (generated) => { generated.implementation.stakeholders = [claim("Finance", "supported", "Finance signed off on the launch.")]; },
+      read: (report) => report.implementation.stakeholders[0],
+    },
+  ];
+
+  for (const scenario of cases) {
+    const generated = draft();
+    scenario.mutate(generated);
+    const report = materializeModelDecisionReport(generated, PROMPT, {
+      idFactory: () => scenario.name,
+    }).report;
+    assert.notEqual(scenario.read(report)?.status, "sourced", scenario.name);
+  }
+});
+
 test("sparse model values materialize as explicit editable missing states", () => {
   const generated = draft();
   generated.decision.background = null;

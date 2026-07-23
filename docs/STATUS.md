@@ -31,8 +31,10 @@ the real GitHub/Jira handoff, and supports audited manual completion. Decision R
 has checked, recoverable removal; action rows and chart flags share stable `D1A1` coordinates, and
 the drawer has working date-range and daily/weekly controls. Short-history action evidence now
 renders as an explicitly descriptive 14-day cross-check while the causal result remains withheld
-until ITS has 45 days on each side. Feature-flag
-rollout and partner acceptance remain.**
+until ITS has 45 days on each side. Slice 9 now adds an operator-managed per-user
+Decision Report rollout with a pinned legacy rollback path; saved reports survive rollback.
+Local clean-state browser acceptance and the remaining sparse/keyboard/adversarial gates pass.
+Three real initially unassisted partner sessions remain the release gate.**
 The retrospective loop closed 2026-07-08 (PR #1) and the
 **prospective Foundations tranche landed 2026-07-12 (PR #12, epic #6, children #7–#11
 all closed, cloud CI green)**: intent-layer schema (`decisions`/`decision_actions(is_lever)`/
@@ -98,7 +100,7 @@ delivery, or production automation.
 ☐ CONNECT  SUPABASE_SERVICE_ROLE_KEY deliberately withheld from Vercel → webhook auto-detect
            + reconcile cron return 500 (paste-URL attribution works; deliberate, reversible)
 ☐ OPEN     #16 connector live (creds) · #18 drift-alert surface (gated) · ~~#19 Jira parity~~ (PR #25)
-◐ ACTIVE   AI-assisted Decision Report partner wedge: Slices 1–8 complete. The 24.4s
+◐ ACTIVE   AI-assisted Decision Report partner wedge: Slices 1–9 implementation complete. The 24.4s
            six-action baseline triggered a sparse three-proof/three-action contract; live
            re-benchmark passed in 13.9s. Durable explicit save/reload is now verified;
            explicit metric/prediction/action activation now materializes atomically and
@@ -107,7 +109,8 @@ delivery, or production automation.
            confirmed metric. The workspace catalog feeds future report metric selection. One
            sanitized PNG/JPEG now
            attaches privately to an editable revision with scoped preview, safe replacement/
-           removal, and active-report locking. Partner rollout is the next gate.
+           removal, and active-report locking. Controlled rollout and local acceptance pass;
+           three initially unassisted partner sessions remain before broader release.
 ```
 
 ## What's built (all on `main`, verified against live evidence)
@@ -419,7 +422,18 @@ tabs. Structure (as-built lives at repo root, NOT `/src`):
   12/12 focused live Supabase persistence/activation/Storage/metric cases, and 40/40 combined
   primary/adversarial RLS cases. TypeScript, focused lint, schema lint, `git diff --check`, and
   the Next.js 16 webpack production build are green.
-- Next, add the rollout flag and run the clean-account, unassisted partner/browser acceptance pass.
+- Slice 9 adds `decision_report_rollouts`, an operator-managed per-user assignment in the shared
+  workspace. New starts resolve to a canonical `?flow=decision-report|legacy` URL. A pinned legacy
+  session never migrates when the assignment is enabled; disabling it sends new/unsaved starts to
+  legacy; `?report=<id>` always opens an already-created durable report.
+- Local clean-state browser acceptance passed live generation, deterministic fallback, direct edits,
+  focused keyboard questions, save/reload, browser Back, private-image failure/success, named CSV
+  metric creation and selection, activation, manual completion, honest no-evidence Impact, and both
+  rollout directions. Existing retry and preliminary-descriptive regression gates remain green.
+- Nine report-specific fabricated-evidence cases now cover decision, background, problem, proof,
+  mechanism, action summary, owner, customer, and stakeholder claims; none can become sourced.
+- Next, run three real initially unassisted partner sessions and record the five-part rubric. Local
+  automation is acceptance evidence but does not satisfy the partner-demand gate.
   Schema/provenance/gap tests, durable save/reload, metric selection, action completion, report
   removal, chart controls, and preliminary descriptive impact are already complete and must not be
   reopened as Slice 9 tasks. Warehouse connectors and automatic causal recomputation remain
@@ -432,13 +446,13 @@ tabs. Structure (as-built lives at repo root, NOT `/src`):
 - Existing metric confirmation, named workspace CSV metric creation, and human prediction commitment
   are implemented; active reports remain bound to one confirmed metric.
 - The final materialization step is implemented; lever/tracker selection stays separate.
-- Feature-flagged rollout with legacy onboarding as rollback.
+- Feature-flagged rollout with legacy onboarding as rollback is implemented. Real partner validation remains.
 
-Slices 1–8 plus the accepted partner-feedback follow-ups delivered the interactive report, bounded
+Slices 1–9 plus the accepted partner-feedback follow-ups delivered the interactive report, bounded
 generation seam, deterministic completion layer, durable revisions, private supplied image,
 atomic activation, report-native isolation, named metric ingestion/selection, action completion,
 recoverable report removal, chart controls, and honest preliminary impact. Remaining target:
-rollout control and end-to-end partner acceptance.
+recorded unassisted partner evidence.
 
 ### 3. Validate before production expansion
 
@@ -446,6 +460,12 @@ Run at least three initially unassisted partner sessions. At least two must pass
 five checks: decision accurate, problem accurate, evidence traceable, metric mechanism
 plausible, next action usable. Only then begin URL/PDF ingestion, conversational delivery,
 richer revision workflows, model routing, or numeric Completion Outlook.
+
+The prepared richer-revision boundary is Slice 10: an activated report may create one explicit
+linear successor iteration. The parent remains immutable and operational while the child is a
+draft; activating the child atomically advances an explicit series pointer without rewriting prior
+decisions, predictions, actions, evidence, or audit rows. This is a documented follow-up, not
+implemented code, and remains gated on the partner evidence above unless product direction changes.
 
 ### 4. Existing operational work
 
