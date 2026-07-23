@@ -10,7 +10,9 @@ export type ReportActivationMetric = {
   metricId: string;
   name: string;
   source: string;
+  unit: string | null;
   hasObservations: boolean;
+  isCore: boolean;
 };
 
 export type MaterializedReportActivation = {
@@ -44,6 +46,8 @@ type MetricRow = {
   metric_id: string;
   name: string;
   source: string;
+  unit: string | null;
+  is_core: boolean;
 };
 
 function validUuid(value: unknown): value is string {
@@ -78,7 +82,7 @@ export async function loadReportActivationMetrics(
   if (!validUuid(scopeId)) return [];
   const response = await sb
     .from("metrics")
-    .select("metric_id, name, source")
+    .select("metric_id, name, source, unit, is_core")
     .eq("scope_id", scopeId)
     .order("name", { ascending: true });
   if (response.error) throw response.error;
@@ -105,7 +109,9 @@ export async function loadReportActivationMetrics(
       metricId: row.metric_id,
       name: row.name,
       source: row.source,
+      unit: row.unit,
       hasObservations: (observationChecks[index].count ?? 0) > 0,
+      isCore: row.is_core === true,
     }];
   });
 }

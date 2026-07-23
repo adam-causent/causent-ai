@@ -50,6 +50,7 @@ export const getDecisionReports = cache(async function getDecisionReports(): Pro
         "active_prediction_id, active_metric_id, updated_at",
     )
     .eq("scope_id", DEMO_SCOPE_ID)
+    .is("deleted_at", null)
     .order("updated_at", { ascending: false });
   if (reportsRes.error) throw reportsRes.error;
 

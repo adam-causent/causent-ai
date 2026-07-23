@@ -16,7 +16,7 @@
 import { revalidatePath } from "next/cache";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { getServerSupabase } from "@/lib/supabase-server";
+import { getServerSupabase, isLocalDemo } from "@/lib/supabase-server";
 import { getSession } from "@/lib/auth/session";
 import { recordFunnelEvent } from "@/lib/data/funnel";
 import { DEMO_SCOPE_ID, METRIC_CONFIG_BY_SLUG } from "@/lib/data/config";
@@ -27,8 +27,51 @@ import {
   validateRevision,
   type PredictionInput,
 } from "@/lib/predictions";
+import { completeManualAction } from "@/lib/actions/manual-completion";
 
 type ActionResult = { ok: true } | { ok: false; errors: string[] };
+
+export type ManualCompletionActionState =
+  | { status: "idle" }
+  | { status: "error"; error: string }
+  | { status: "success"; completedOn: string; explanation: string };
+
+export async function completeManualActionAction(
+  _previous: ManualCompletionActionState,
+  formData: FormData,
+): Promise<ManualCompletionActionState> {
+  const session = await getSession();
+  if (!isLocalDemo() && !session.userId) {
+    return { status: "error", error: "Sign in before completing an action." };
+  }
+  const actionId = formData.get("actionId");
+  const completedOn = formData.get("completedOn");
+  const explanation = formData.get("explanation");
+  if (
+    typeof actionId !== "string" ||
+    typeof completedOn !== "string" ||
+    typeof explanation !== "string"
+  ) {
+    return { status: "error", error: "Complete every field before saving." };
+  }
+  const result = await completeManualAction(await getServerSupabase(), {
+    scopeId: session.workspaceId,
+    actionId,
+    completedOn,
+    explanation,
+    authoredBy: session.userId,
+  });
+  if (!result.ok) return { status: "error", error: result.error };
+
+  revalidatePath("/actions");
+  revalidatePath("/impact");
+  revalidatePath("/", "layout");
+  return {
+    status: "success",
+    completedOn: result.completion.completedOn,
+    explanation: result.completion.explanation,
+  };
+}
 
 /** UI "a-<pr>" id -> DB action row (via external_ref, as lib/data maps it). */
 async function actionRow(

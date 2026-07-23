@@ -1,4 +1,5 @@
 import type { MetricFormat, Observation } from "@/lib/types";
+import Link from "next/link";
 import { formatMetricValue, formatMonthTick, formatShortDate } from "@/lib/format";
 import {
   indexOfDate,
@@ -12,6 +13,8 @@ export type SeriesFlag = {
   date: string;
   label: string;
   color?: string;
+  href?: string;
+  title?: string;
 };
 
 const PLOT_H = 100; // viewBox units; SVG scales to container via non-scaling stroke
@@ -123,19 +126,30 @@ export function LineTimeSeries({
         </svg>
 
         {/* flag pills */}
-        {flagPositions.map((f, i) => (
-          <div
-            key={i}
-            className="absolute -top-[15px] -translate-x-1/2 whitespace-nowrap rounded-full border bg-[var(--surface)] px-1.5 py-[1px] text-[10px] font-medium leading-none tabular-nums shadow-sm"
-            style={{
-              left: `${f.left}%`,
-              borderColor: f.color ?? color,
-              color: f.color ?? color,
-            }}
-          >
-            {f.label}
-          </div>
-        ))}
+        {flagPositions.map((f, i) => {
+          const className = "absolute -top-[15px] -translate-x-1/2 whitespace-nowrap rounded-full border bg-[var(--surface)] px-1.5 py-[1px] text-[10px] font-medium leading-none tabular-nums shadow-sm";
+          const style = {
+            left: `${f.left}%`,
+            borderColor: f.color ?? color,
+            color: f.color ?? color,
+          };
+          return f.href ? (
+            <Link
+              key={i}
+              href={f.href}
+              title={f.title}
+              aria-label={f.title ? `${f.label}: ${f.title}` : f.label}
+              className={`${className} z-10 hover:bg-[var(--bg)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2`}
+              style={style}
+            >
+              {f.label}
+            </Link>
+          ) : (
+            <span key={i} className={className} style={style} title={f.title}>
+              {f.label}
+            </span>
+          );
+        })}
       </div>
 
       {/* x-axis labels */}

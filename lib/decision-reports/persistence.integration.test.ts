@@ -8,7 +8,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cloneDecisionReport } from "./schema.ts";
 import { GUMMY_ALPHA_GOLDEN_EXAMPLE } from "./fixtures/gummy-alpha.ts";
 import { createSafeFallbackReport } from "./generation-contract.ts";
-import { loadDecisionReport, saveDecisionReport } from "./persistence.ts";
+import { deleteDecisionReport, loadDecisionReport, saveDecisionReport } from "./persistence.ts";
 
 function loadEnvLocal(): Record<string, string> {
   try {
@@ -195,4 +195,59 @@ test("the database refuses report_ready for a sparse snapshot", async (t) => {
   });
   assert.equal(result.error?.code, "22023");
   assert.match(result.error?.message ?? "", /Required report fields are incomplete/);
+});
+
+test("ordinary saves cannot promote an arbitrary supplied-image id", async (t) => {
+  if (!gated(t) || !sb) return;
+  const created = await saveDecisionReport(sb, WORKSPACE, {
+    reportId: null,
+    baseRevisionId: null,
+    report: GUMMY_ALPHA_GOLDEN_EXAMPLE.report,
+    metricProjection: GUMMY_ALPHA_GOLDEN_EXAMPLE.metricProjection,
+    authoredBy: null,
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const forged = cloneDecisionReport(created.saved.report);
+  forged.implementation.assetIds = [randomUUID()];
+  const result = await saveDecisionReport(sb, WORKSPACE, {
+    reportId: created.saved.reportId,
+    baseRevisionId: created.saved.revisionId,
+    report: forged,
+    metricProjection: created.saved.metricProjection,
+    authoredBy: null,
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, "forbidden");
+});
+
+test("non-active reports leave history after a retry-safe soft deletion", async (t) => {
+  if (!gated(t) || !sb) return;
+  const created = await saveDecisionReport(sb, WORKSPACE, {
+    reportId: null,
+    baseRevisionId: null,
+    report: GUMMY_ALPHA_GOLDEN_EXAMPLE.report,
+    metricProjection: GUMMY_ALPHA_GOLDEN_EXAMPLE.metricProjection,
+    authoredBy: null,
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  const removed = await deleteDecisionReport(sb, WORKSPACE, created.saved.reportId, null);
+  assert.equal(removed.ok, true, removed.ok ? undefined : removed.error);
+  if (!removed.ok) return;
+  assert.equal(removed.reused, false);
+  const retry = await deleteDecisionReport(sb, WORKSPACE, created.saved.reportId, null);
+  assert.equal(retry.ok, true, retry.ok ? undefined : retry.error);
+  if (retry.ok) assert.equal(retry.reused, true);
+
+  const loaded = await loadDecisionReport(sb, WORKSPACE, created.saved.reportId);
+  assert.equal(loaded.ok, false);
+  if (!loaded.ok) assert.equal(loaded.code, "not_found");
+  const revisionCount = await sb
+    .from("decision_report_revisions")
+    .select("revision_id", { count: "exact", head: true })
+    .eq("report_id", created.saved.reportId);
+  assert.equal(revisionCount.error, null, revisionCount.error?.message);
+  assert.equal(revisionCount.count, 1);
 });

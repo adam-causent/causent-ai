@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { importReportMetricObservations } from "./import.ts";
+import {
+  importReportMetricObservations,
+  importWorkspaceMetricCsv,
+  setWorkspaceCoreMetric,
+} from "./import.ts";
 
 const IDS = {
   scope: "ca5e0000-0000-0000-0000-000000000071",
@@ -85,4 +89,92 @@ test("authorization failures are actionable and are not retried", async () => {
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, "forbidden");
   assert.equal(calls.length, 1);
+});
+
+test("workspace metric import sends the name/unit catalog RPC and maps creation", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const result = await importWorkspaceMetricCsv(client({
+    data: [{
+      metric_id: IDS.metric,
+      metric_name: "AI assistant adoption rate",
+      metric_unit: "percent",
+      created: true,
+      accepted_rows: 2,
+      inserted_rows: 2,
+      updated_rows: 0,
+      start_date: "2026-07-20",
+      end_date: "2026-07-21",
+    }],
+    error: null,
+  }, calls), {
+    scopeId: IDS.scope,
+    name: "AI assistant adoption rate",
+    unit: "percent",
+    observations: [{ date: "2026-07-20", value: 0.4 }, { date: "2026-07-21", value: 0.41 }],
+    authoredBy: IDS.actor,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.summary.created, true);
+    assert.equal(result.summary.metricUnit, "percent");
+  }
+  assert.deepEqual(calls, [{
+    name: "import_workspace_metric_csv_v1",
+    args: {
+      p_scope_id: IDS.scope,
+      p_name: "AI assistant adoption rate",
+      p_unit: "percent",
+      p_observations: [{ date: "2026-07-20", value: 0.4 }, { date: "2026-07-21", value: 0.41 }],
+      p_authored_by: IDS.actor,
+    },
+  }]);
+});
+
+test("workspace metric import rejects invalid catalog inputs before the RPC", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const sb = client({ data: null, error: null }, calls);
+  const invalidName = await importWorkspaceMetricCsv(sb, {
+    scopeId: IDS.scope,
+    name: "\u0000",
+    unit: "count",
+    observations: [{ date: "2026-07-20", value: 1 }],
+    authoredBy: IDS.actor,
+  });
+  assert.equal(invalidName.ok, false);
+  const invalidUnit = await importWorkspaceMetricCsv(sb, {
+    scopeId: IDS.scope,
+    name: "Visits",
+    unit: "bogus" as never,
+    observations: [{ date: "2026-07-20", value: 1 }],
+    authoredBy: IDS.actor,
+  });
+  assert.equal(invalidUnit.ok, false);
+  assert.equal(calls.length, 0);
+});
+
+test("core metric selection sends one scoped RPC and maps the selection count", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const result = await setWorkspaceCoreMetric(client({
+    data: [{ selected_metric_id: IDS.metric, is_core: true, core_metric_count: 2 }],
+    error: null,
+  }, calls), {
+    scopeId: IDS.scope,
+    metricId: IDS.metric,
+    isCore: true,
+    authoredBy: IDS.actor,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.metricId, IDS.metric);
+    assert.equal(result.coreMetricCount, 2);
+  }
+  assert.deepEqual(calls, [{
+    name: "set_workspace_core_metric_v1",
+    args: {
+      p_scope_id: IDS.scope,
+      p_metric_id: IDS.metric,
+      p_is_core: true,
+      p_authored_by: IDS.actor,
+    },
+  }]);
 });

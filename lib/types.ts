@@ -51,16 +51,25 @@ export type ImpactCell = {
   label: string;
   /** Whether this cell is a positive business outcome (accounts for inverted metrics). */
   good: boolean;
+  /** Causal is authoritative ITS; descriptive is the preliminary 14-day cross-check. */
+  evidence?: "causal" | "descriptive";
+  /** Honest UI qualifier for preliminary or otherwise non-authoritative readouts. */
+  detail?: string;
 };
 
 /** A shipped action (v1: a merged GitHub PR). */
 export type Action = {
   id: string;
+  /** Stable visible coordinate within the decision plan, e.g. D1A1. */
+  displayCode?: string;
   /** GitHub PR number, e.g. 8421. */
   pr: number;
   /** Origin and human-readable reference. Optional for legacy seed fixtures. */
   source?: "github" | "jira" | "manual";
   referenceLabel?: string;
+  /** Stable Decision Report item id for matching the durable action detail. */
+  sourceItemId?: string;
+  ownerLabel?: string;
   title: string;
   /** ISO yyyy-mm-dd ship date. null = not yet shipped (an open lever — see VOIDED). */
   shippedAt: string | null;
@@ -73,6 +82,10 @@ export type Action = {
     hypothesis: string;
     expectedMetricId: string;
     body: string[];
+  };
+  manualCompletion?: {
+    completedOn: string;
+    explanation: string;
   };
 };
 

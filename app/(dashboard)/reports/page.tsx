@@ -16,9 +16,10 @@ export default async function ReportsPage() {
     metrics,
     actions,
     decisionReports,
+    source,
   } = await loadDashboardData();
 
-  if (decisionReports.length > 0) {
+  if (source === "db") {
     return <DecisionReportsIndex reports={decisionReports} />;
   }
 

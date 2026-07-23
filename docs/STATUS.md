@@ -17,12 +17,22 @@ metric relationship, and selected actions. Approved design:
 
 ## TL;DR
 
-**Both existing loops are on `main`; Decision Report Slices 1–7 are implemented on
-`codex/ai-decision-report`. Bounded generation, durable report persistence, human-controlled
+**Both existing loops and Decision Report Slices 1–7 are on `main`; Slice 8 and the accepted
+same-day partner-feedback follow-ups are prepared on `codex/decision-report-slice-8` for review. Bounded generation, durable report persistence, human-controlled
 metric/prediction/action activation, and the atomic Actions & Decisions handoff are
 live-validated. Report-native dashboard isolation, Reports-tab indexing, and authenticated
-daily CSV ingestion into the activated report metric are implemented. Supplied-image handling,
-feature-flag rollout, and partner acceptance remain.**
+daily CSV ingestion into the activated report metric, and the private sanitized supplied-image
+path are implemented. Named workspace CSV metric creation now feeds an in-place, up-to-five
+workspace-metric selector without widening report-owned decisions or impact; Data Workshop uses
+one consolidated uploader, onboarding exposes the same multi-select beside the report's one
+prediction metric, and the selected metrics drive the persistent bottom drawer. The report-native
+Actions view now starts with the durable Decision Summary, uses expandable action rows, explains
+the real GitHub/Jira handoff, and supports audited manual completion. Decision Report history now
+has checked, recoverable removal; action rows and chart flags share stable `D1A1` coordinates, and
+the drawer has working date-range and daily/weekly controls. Short-history action evidence now
+renders as an explicitly descriptive 14-day cross-check while the causal result remains withheld
+until ITS has 45 days on each side. Feature-flag
+rollout and partner acceptance remain.**
 The retrospective loop closed 2026-07-08 (PR #1) and the
 **prospective Foundations tranche landed 2026-07-12 (PR #12, epic #6, children #7–#11
 all closed, cloud CI green)**: intent-layer schema (`decisions`/`decision_actions(is_lever)`/
@@ -88,14 +98,16 @@ delivery, or production automation.
 ☐ CONNECT  SUPABASE_SERVICE_ROLE_KEY deliberately withheld from Vercel → webhook auto-detect
            + reconcile cron return 500 (paste-URL attribution works; deliberate, reversible)
 ☐ OPEN     #16 connector live (creds) · #18 drift-alert surface (gated) · ~~#19 Jira parity~~ (PR #25)
-◐ ACTIVE   AI-assisted Decision Report partner wedge: Slices 1–7 complete. The 24.4s
+◐ ACTIVE   AI-assisted Decision Report partner wedge: Slices 1–8 complete. The 24.4s
            six-action baseline triggered a sparse three-proof/three-action contract; live
            re-benchmark passed in 13.9s. Durable explicit save/reload is now verified;
            explicit metric/prediction/action activation now materializes atomically and
            hands the user to Actions & Decisions. Data Workshop now imports a bounded
-           daily CSV into only that report's confirmed metric. Slice 8 is the private
-           supplied-image path; the implementation handoff is in
-           memory/2026-07-22-decision-report-slice-8-handoff.md.
+           daily CSV into a named workspace metric or, after activation, only that report's
+           confirmed metric. The workspace catalog feeds future report metric selection. One
+           sanitized PNG/JPEG now
+           attaches privately to an editable revision with scoped preview, safe replacement/
+           removal, and active-report locking. Partner rollout is the next gate.
 ```
 
 ## What's built (all on `main`, verified against live evidence)
@@ -373,25 +385,60 @@ tabs. Structure (as-built lives at repo root, NOT `/src`):
   partial rows. No lever, tracker ticket, causal edge, evidence object, or impact claim is created.
 - Active reports are immutable and deep-link to the new decision in Actions & Decisions.
   Report-created actions use UUID identities plus a `Planned` label instead of fake PR numbers.
+- Partner-feedback polish removes the empty report navigation column. The durable Decision Report
+  now supplies the Decision Summary and evidence box; report actions render as expandable rows with
+  tracker reference, completion state, details, owner, governance, and a member-only manual
+  completion date/explanation path. Connector copy states the current boundary honestly: there is
+  no account OAuth yet; configured workspace credentials, read-only create links, pasted URLs, and
+  webhooks are the supported paths.
+- Core metric selection is separate from report activation. Members can add up to five daily
+  workspace metrics in place from Data Workshop or onboarding; selected metrics appear across the
+  tabs and drawer, while the active report keeps its one confirmed prediction metric and continues
+  to isolate report-owned actions and impact. Trash removes a selected metric; a report-required
+  metric remains labeled and locked unless independently selected.
+- Decision Reports can be removed from visible history through one confirmed, member-only soft
+  delete. Revisions, supplied bytes, and an activated report's canonical graph remain audit-safe,
+  but RLS hides removed report/revision/asset surfaces and legacy fallback excludes orphaned
+  report-native graph rows. The next remaining live activated report becomes the boundary.
+- Report action coordinates are stable and human-readable (`D1A1`, `D1A2`, ...), following the
+  reviewed report order. The same coordinate appears in the expandable action header and on the
+  Core Metrics event flag; the flag deep-links to that opened action. Drawer controls now apply
+  30/60/90/all-data ranges and Daily/Weekly aggregation instead of rendering inert labels.
+- Impact now loads the stored descriptive cross-check as well as authoritative ITS evidence. When
+  ITS is below the 45-day-per-side confidence floor, the UI may show the 14-day mean shift as
+  **preliminary descriptive** while belief remains unknown and the aggregate causal summary stays
+  empty. The local Gummy Alpha path renders `+3.1pp` from 46 pre/15 post observations and labels
+  the overlapping-action limitation; this is not an isolated causal estimate.
 - Automated Slice 5 acceptance includes 376 library tests (337 passed, 39 environment-gated
   skips, zero failures), 4/4 separate live persistence/activation integration cases, and 22/22
   authenticated RLS isolation cases; the full engine suite passes 1,166/1,166. TypeScript,
   focused lint, schema lint, and the documented webpack production build pass. The default
   Turbopack build remains blocked by the existing `engine/.venv/bin/python` symlink escaping
   its filesystem root.
-- Next, add real metric creation/CSV ingestion and the supplied-image path, index saved reports in
-  Reports, add the rollout flag, and run the unassisted partner/browser acceptance pass.
+- The Slice 8 release gate passes 420 library tests (373 passed, 47 environment/live-model skips),
+  12/12 focused live Supabase persistence/activation/Storage/metric cases, and 40/40 combined
+  primary/adversarial RLS cases. TypeScript, focused lint, schema lint, `git diff --check`, and
+  the Next.js 16 webpack production build are green.
+- Next, add the rollout flag and run the clean-account, unassisted partner/browser acceptance pass.
+  Schema/provenance/gap tests, durable save/reload, metric selection, action completion, report
+  removal, chart controls, and preliminary descriptive impact are already complete and must not be
+  reopened as Slice 9 tasks. Warehouse connectors and automatic causal recomputation remain
+  separate follow-up work.
 
 ### 2. Finish the partner wedge
 
 - Partial three-section report plus coordinated evidence, metric, action, and mock-up views.
 - Inline focused gap questions rather than general chatbot infrastructure.
-- Existing metric confirmation and human prediction commitment are implemented; metric creation/CSV remains.
+- Existing metric confirmation, named workspace CSV metric creation, and human prediction commitment
+  are implemented; active reports remain bound to one confirmed metric.
 - The final materialization step is implemented; lever/tracker selection stays separate.
 - Feature-flagged rollout with legacy onboarding as rollback.
 
-Slices 1–6 delivered the interactive report, bounded generation seam, deterministic completion layer, durable revisions, atomic activation handoff, and report-native dashboard isolation with tracker continuation. Remaining target: partner inputs, rollout controls, and end-to-end acceptance in
-roughly 2–3 weeks; stabilized wedge in 3–5 weeks at 15–25 focused hours/week.
+Slices 1–8 plus the accepted partner-feedback follow-ups delivered the interactive report, bounded
+generation seam, deterministic completion layer, durable revisions, private supplied image,
+atomic activation, report-native isolation, named metric ingestion/selection, action completion,
+recoverable report removal, chart controls, and honest preliminary impact. Remaining target:
+rollout control and end-to-end partner acceptance.
 
 ### 3. Validate before production expansion
 

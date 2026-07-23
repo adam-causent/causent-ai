@@ -21,6 +21,7 @@ export default async function ActionsPage() {
         metrics={metrics}
         objective={objective}
         connectorMetricId={activeDecisionReport?.metricId ?? null}
+        decisionReport={activeDecisionReport?.report ?? null}
       />
     </Suspense>
   );

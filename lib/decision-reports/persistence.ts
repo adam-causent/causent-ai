@@ -63,6 +63,14 @@ export type LoadDecisionReportResult =
       error: string;
     };
 
+export type DeleteDecisionReportResult =
+  | { ok: true; reportId: string; deletedAt: string; reused: boolean }
+  | {
+      ok: false;
+      code: "validation" | "forbidden" | "database";
+      error: string;
+    };
+
 type RpcSaveRow = {
   report_id: string;
   revision_id: string;
@@ -104,6 +112,12 @@ type ActivationRow = {
   activated_at: string;
 };
 
+type RpcDeleteRow = {
+  report_id: string;
+  deleted_at: string;
+  reused: boolean;
+};
+
 function persistenceStatus(report: DecisionReportV1): EditableDecisionReportStatus {
   return scanDecisionReportGaps(report).length === 0 ? "report_ready" : "draft";
 }
@@ -134,6 +148,60 @@ function firstRpcRow(value: unknown): RpcSaveRow | null {
     return null;
   }
   return row as RpcSaveRow;
+}
+
+function firstDeleteRpcRow(value: unknown): RpcDeleteRow | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const row = value[0] as Partial<RpcDeleteRow>;
+  if (
+    !validUuid(row.report_id ?? null) ||
+    typeof row.deleted_at !== "string" ||
+    Number.isNaN(Date.parse(row.deleted_at)) ||
+    typeof row.reused !== "boolean"
+  ) {
+    return null;
+  }
+  return row as RpcDeleteRow;
+}
+
+export async function deleteDecisionReport(
+  sb: SupabaseClient,
+  scopeId: string,
+  reportId: string,
+  authoredBy: string | null,
+): Promise<DeleteDecisionReportResult> {
+  if (
+    !validUuid(scopeId) ||
+    !validUuid(reportId) ||
+    (authoredBy !== null && !validUuid(authoredBy))
+  ) {
+    return { ok: false, code: "validation", error: "Report address is invalid." };
+  }
+  const response = await sb.rpc("delete_decision_report_v1", {
+    p_scope_id: scopeId,
+    p_report_id: reportId,
+    p_authored_by: authoredBy,
+  });
+  if (response.error) {
+    if (response.error.code === "42501") {
+      return {
+        ok: false,
+        code: "forbidden",
+        error: "This report is unavailable in the current workspace.",
+      };
+    }
+    return { ok: false, code: "database", error: response.error.message };
+  }
+  const row = firstDeleteRpcRow(response.data);
+  if (!row) {
+    return { ok: false, code: "database", error: "The database returned an invalid deletion receipt." };
+  }
+  return {
+    ok: true,
+    reportId: row.report_id,
+    deletedAt: row.deleted_at,
+    reused: row.reused,
+  };
 }
 
 export async function saveDecisionReport(
@@ -256,6 +324,7 @@ export async function loadDecisionReport(
     )
     .eq("scope_id", scopeId)
     .eq("report_id", reportId)
+    .is("deleted_at", null)
     .maybeSingle();
   if (reportResponse.error) {
     return { ok: false, code: "database", error: reportResponse.error.message };

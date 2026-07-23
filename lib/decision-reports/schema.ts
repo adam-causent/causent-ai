@@ -187,8 +187,8 @@ export function validateDecisionReport(value: unknown): ValidationResult {
       );
     }
 
-    if (!Array.isArray(implementation.assetIds) || implementation.assetIds.some((id) => typeof id !== "string")) {
-      errors.push("implementation.assetIds must be a string array");
+    if (!Array.isArray(implementation.assetIds) || implementation.assetIds.length > 1 || implementation.assetIds.some((id) => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id))) {
+      errors.push("implementation.assetIds must contain at most one UUID");
     }
 
     const governance = implementation.governance;

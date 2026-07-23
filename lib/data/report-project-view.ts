@@ -27,10 +27,20 @@ export function selectReportProjectView(input: {
     (report) => report.status === "active" && report.decisionId && report.metricId,
   ) ?? null;
   if (!activeReport) {
+    const removedReportDecisions = input.decisions.filter(
+      (decision) => decision.origin === "decision_report",
+    );
+    const removedReportActionIds = new Set(
+      removedReportDecisions.flatMap((decision) => decision.actionIds),
+    );
     return {
       activeReport: null,
-      actions: input.actions,
-      decisions: input.decisions,
+      actions: removedReportDecisions.length === 0
+        ? input.actions
+        : input.actions.filter((action) => !removedReportActionIds.has(action.id)),
+      decisions: removedReportDecisions.length === 0
+        ? input.decisions
+        : input.decisions.filter((decision) => decision.origin !== "decision_report"),
       metrics: input.metrics,
       aggregatedImpact: input.aggregatedImpact,
       impactByMetric: input.impactByMetric,

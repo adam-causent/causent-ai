@@ -11,6 +11,7 @@ import {
   type ReportActivationMetric,
 } from "@/lib/decision-reports/materialization";
 import { getServerSupabase, isLocalDemo } from "@/lib/supabase-server";
+import { loadAttachedReportAsset } from "@/lib/decision-reports/assets";
 
 // Slice 5 of the AI-assisted onboarding: a reviewed saved revision can be
 // explicitly activated into one decision, one human prediction, and selected
@@ -48,14 +49,16 @@ export default async function OnboardingPage({
       if (!isLocalDemo() && !session.userId) {
         initialLoadError = "Sign in to open this saved report.";
       } else {
-        const [loaded, scope] = await Promise.all([
+        const sb = await getServerSupabase();
+        const [loaded, scope, asset] = await Promise.all([
           loadDecisionReport(
-            await getServerSupabase(),
+            sb,
             session.workspaceId,
             requestedReportId,
           ),
           getScope(),
-        ]).catch(() => [null, null] as const);
+          loadAttachedReportAsset(sb, requestedReportId),
+        ]).catch(() => [null, null, null] as const);
 
         if (loaded?.ok && scope) {
           initialSavedReport = {
@@ -70,6 +73,7 @@ export default async function OnboardingPage({
               savedAt: loaded.saved.savedAt,
               activation: loaded.saved.activation,
             },
+            asset: asset ?? null,
           };
         } else {
           initialLoadError = loaded && !loaded.ok

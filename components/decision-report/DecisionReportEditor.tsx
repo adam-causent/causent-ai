@@ -6,6 +6,10 @@ import {
   saveDecisionReportAction,
   type SaveDecisionReportActionResult,
 } from "@/app/(onboarding)/onboarding/decision-report-persistence-actions";
+import {
+  removeDecisionReportImageAction,
+  uploadDecisionReportImageAction,
+} from "@/app/(onboarding)/onboarding/decision-report-asset-actions";
 import { ProvenanceLegend } from "@/components/decision-report/ClaimEditor";
 import { DecisionSection } from "@/components/decision-report/DecisionSection";
 import { ImplementationSection } from "@/components/decision-report/ImplementationSection";
@@ -24,6 +28,7 @@ import { cloneDecisionReport } from "@/lib/decision-reports/schema";
 import type { DecisionReportPersistenceStatus } from "@/lib/decision-reports/persistence";
 import type { DecisionReportActivationPointer } from "@/lib/decision-reports/persistence";
 import type { ReportActivationMetric } from "@/lib/decision-reports/materialization";
+import type { ReportAssetView } from "@/lib/decision-reports/assets";
 
 type ReportPersistenceState = {
   reportId: string;
@@ -40,6 +45,7 @@ export function DecisionReportEditor({
   projectName,
   generationMeta,
   initialPersistence,
+  initialAsset,
   activationMetrics,
   onStartOver,
 }: {
@@ -54,6 +60,7 @@ export function DecisionReportEditor({
     totalTokens: number | null;
   };
   initialPersistence?: ReportPersistenceState;
+  initialAsset?: ReportAssetView | null;
   activationMetrics: ReportActivationMetric[];
   onStartOver: () => void;
 }) {
@@ -61,6 +68,8 @@ export function DecisionReportEditor({
   const [report, setReport] = useState(() => cloneDecisionReport(initialReport));
   const [editError, setEditError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [assetError, setAssetError] = useState<string | null>(null);
+  const [asset, setAsset] = useState<ReportAssetView | null>(initialAsset ?? null);
   const [persistence, setPersistence] = useState<ReportPersistenceState | null>(
     initialPersistence ?? null,
   );
@@ -68,6 +77,7 @@ export function DecisionReportEditor({
     initialPersistence ? JSON.stringify(initialReport) : null,
   );
   const [isSaving, startSaving] = useTransition();
+  const [isChangingAsset, startChangingAsset] = useTransition();
   const gaps = scanDecisionReportGaps(report);
   const ready = gaps.length === 0;
   const hasUnsavedChanges = savedSnapshot !== JSON.stringify(report);
@@ -156,6 +166,60 @@ export function DecisionReportEditor({
         router.replace(`/onboarding?report=${result.saved.reportId}`, { scroll: false });
       } catch {
         setSaveError("Causent could not save this report. Your edits are still here—try again.");
+      }
+    });
+  }
+
+  function uploadAsset(file: File) {
+    if (!persistence) {
+      setAssetError("Save the report before uploading a supplied image.");
+      return;
+    }
+    setAssetError(null);
+    startChangingAsset(async () => {
+      const formData = new FormData();
+      formData.set("image", file);
+      try {
+        const result = await uploadDecisionReportImageAction({
+          reportId: persistence.reportId,
+          baseRevisionId: persistence.revisionId,
+          report,
+          metricProjection: projection,
+        }, formData);
+        if (!result.ok) return setAssetError(result.error);
+        const nextReport = cloneDecisionReport(report);
+        nextReport.implementation.assetIds = result.asset ? [result.asset.assetId] : [];
+        setReport(nextReport);
+        setAsset(result.asset);
+        setPersistence({ ...persistence, revisionId: result.revisionId, status: result.status, savedAt: new Date().toISOString() });
+        setSavedSnapshot(JSON.stringify(nextReport));
+        router.replace(`/onboarding?report=${persistence.reportId}`, { scroll: false });
+      } catch {
+        setAssetError("Causent could not process that image. Your report was not changed—try again.");
+      }
+    });
+  }
+
+  function removeAsset() {
+    if (!persistence || !asset) return;
+    setAssetError(null);
+    startChangingAsset(async () => {
+      try {
+        const result = await removeDecisionReportImageAction({
+          reportId: persistence.reportId,
+          baseRevisionId: persistence.revisionId,
+          report,
+          metricProjection: projection,
+        }, asset.assetId);
+        if (!result.ok) return setAssetError(result.error);
+        const nextReport = cloneDecisionReport(report);
+        nextReport.implementation.assetIds = [];
+        setReport(nextReport);
+        setAsset(null);
+        setPersistence({ ...persistence, revisionId: result.revisionId, status: result.status, savedAt: new Date().toISOString() });
+        setSavedSnapshot(JSON.stringify(nextReport));
+      } catch {
+        setAssetError("Causent could not remove that image. It remains private and attached—try again.");
       }
     });
   }
@@ -250,6 +314,12 @@ export function DecisionReportEditor({
         onActionSummaryChange={updateActionSummary}
         onActionOwnerChange={updateActionOwner}
         onDataClassificationChange={setDataClassification}
+        asset={asset}
+        assetPending={isChangingAsset}
+        assetDisabled={!persistence}
+        assetError={assetError}
+        onAssetUpload={uploadAsset}
+        onAssetRemove={removeAsset}
       />
 
       {!reportIsActive ? (

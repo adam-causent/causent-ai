@@ -9,16 +9,22 @@ import { formatLongDate, formatShortDate } from "@/lib/format";
 import { LineTimeSeries, type SeriesFlag } from "@/components/charts/LineTimeSeries";
 import { Sparkline } from "@/components/charts/Sparkline";
 import { Delta } from "@/components/ui/Delta";
-import { CalendarIcon, ChevronIcon, PlusIcon } from "@/components/ui/icons";
+import { CalendarIcon, ChevronIcon } from "@/components/ui/icons";
 import { selectReportMetricView } from "@/lib/data/action-plan-view";
+import {
+  filterSeriesRange,
+  prepareSeries,
+  type SeriesCadence,
+  type SeriesRange,
+} from "@/lib/metrics/series-controls";
 
 // Persistent bottom drawer. Core metrics "run through everything" — a daily time
 // series per metric with named action flags, always checkable in the background.
 // Data (metrics/actions/window) is fetched by the server layout and threaded in as
 // props; this component never reads the DB or the seed directly.
 
-const WINDOW_DAYS = 46; // matches the drawer's date-range control
 const MAX_FLAGS = 5; // thin so PR pills never overlap
+const RANGE_OPTIONS: SeriesRange[] = ["30d", "60d", "90d", "all"];
 
 /** Evenly sample at most `max` items so flags stay readable. */
 function thin<T>(arr: T[], max: number): T[] {
@@ -31,16 +37,16 @@ export function CoreMetricsDrawer({
   metrics,
   actions,
   decisions,
-  impactWindow,
   projectMetricLabel,
 }: {
   metrics: Metric[];
   actions: Action[];
   decisions: Decision[];
-  impactWindow: { start: string; end: string };
   projectMetricLabel: string | null;
 }) {
   const [open, setOpen] = useState(true);
+  const [range, setRange] = useState<SeriesRange>("60d");
+  const [cadence, setCadence] = useState<SeriesCadence>("daily");
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const reportMetricView = pathname === "/actions"
@@ -53,32 +59,50 @@ export function CoreMetricsDrawer({
       (!reportMetricView.metric || reportMetricView.metric.series.length === 0)) ||
       (projectMetricLabel && (metrics.length === 0 || metrics.every((metric) => metric.series.length === 0))),
   );
+  const metricCountLabel = reportMetricView
+    ? reportMetricNeedsData
+      ? "no data"
+      : "1/1"
+    : projectMetricLabel && metrics.length === 1
+      ? reportMetricNeedsData
+        ? "no data"
+        : "1/1"
+      : `${metrics.length}/5`;
 
-  const chartMetrics = visibleMetrics.slice(0, 3); // stacked hero charts
+  const chartMetrics = visibleMetrics.slice(0, 3).map((metric) => ({
+    metric,
+    series: prepareSeries(metric.series, range, cadence),
+    flagWindow: filterSeriesRange(metric.series, range),
+  })); // stacked hero charts
   const visibleSeries = visibleMetrics[0]?.series ?? [];
-  const visibleWindow = reportMetricView && visibleSeries.length > 0
-    ? {
-        start: visibleSeries[Math.max(0, visibleSeries.length - WINDOW_DAYS)].date,
-        end: visibleSeries[visibleSeries.length - 1].date,
-      }
-    : impactWindow;
-  const dateLabel =
-    visibleWindow.start && visibleWindow.end
-      ? `${formatShortDate(visibleWindow.start)} – ${formatLongDate(visibleWindow.end)}`
-      : "—";
 
-  // All metrics share the same daily date axis, so one window start covers them all.
-  const baseSeries = visibleSeries;
-  const windowStart =
-    baseSeries.length > 0
-      ? baseSeries[Math.max(0, baseSeries.length - WINDOW_DAYS)].date
-      : "";
-
-  const flagsForMetric = (color: string): SeriesFlag[] =>
-    thin(
-      visibleActions.filter((a) => a.shippedAt !== null && a.shippedAt >= windowStart),
+  const flagsForMetric = (color: string, series: Metric["series"]): SeriesFlag[] => {
+    const windowStart = series[0]?.date ?? "";
+    const windowEnd = series.at(-1)?.date ?? "";
+    return thin(
+      visibleActions
+        .filter((action) =>
+          action.shippedAt !== null &&
+          action.shippedAt >= windowStart &&
+          action.shippedAt <= windowEnd,
+        )
+        .sort((left, right) => (left.shippedAt ?? "").localeCompare(right.shippedAt ?? "")),
       MAX_FLAGS,
-    ).map((a) => ({ date: a.shippedAt!, label: `#${a.pr}`, color }));
+    ).map((action) => ({
+      date: action.shippedAt!,
+      label: action.displayCode ?? action.referenceLabel ?? (action.pr > 0 ? `#${action.pr}` : "Action"),
+      color,
+      href: `/actions?selected=${encodeURIComponent(action.id)}#${encodeURIComponent(action.id)}`,
+      title: action.title,
+    }));
+  };
+
+  function rangeOptionLabel(option: SeriesRange): string {
+    const optionSeries = filterSeriesRange(visibleSeries, option);
+    if (optionSeries.length === 0) return option === "all" ? "All data" : `Last ${option.slice(0, -1)} days`;
+    const dates = `${formatShortDate(optionSeries[0].date)} – ${formatLongDate(optionSeries.at(-1)!.date)}`;
+    return option === "all" ? `All data · ${dates}` : dates;
+  }
 
   return (
     <section className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)]">
@@ -100,24 +124,40 @@ export function CoreMetricsDrawer({
           />
           Core Metrics
           <span className="text-[var(--text-subtle)]">
-            {reportMetricView || projectMetricLabel
-              ? reportMetricNeedsData
-                ? "no data"
-                : "1/1"
-              : `${metrics.length}/5`}
+            {metricCountLabel}
           </span>
         </button>
 
         {!reportMetricNeedsData ? (
           <div className="flex items-center gap-2 text-[12px]">
-            <span className="flex items-center gap-1.5 rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-muted)]">
+            <label className="relative flex items-center gap-1.5 rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-muted)] focus-within:border-[var(--brand-blue)]">
               <CalendarIcon className="text-[var(--text-subtle)]" />
-              {dateLabel}
-            </span>
-            <span className="flex items-center gap-1.5 rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-muted)]">
-              Daily
-              <ChevronIcon size={13} className="text-[var(--text-subtle)]" />
-            </span>
+              <span className="sr-only">Chart date range</span>
+              <select
+                aria-label="Chart date range"
+                value={range}
+                onChange={(event) => setRange(event.target.value as SeriesRange)}
+                className="max-w-[230px] appearance-none bg-transparent pr-4 outline-none"
+              >
+                {RANGE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{rangeOptionLabel(option)}</option>
+                ))}
+              </select>
+              <ChevronIcon size={13} className="pointer-events-none absolute right-1.5 text-[var(--text-subtle)]" />
+            </label>
+            <label className="relative flex items-center rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-muted)] focus-within:border-[var(--brand-blue)]">
+              <span className="sr-only">Chart cadence</span>
+              <select
+                aria-label="Chart cadence"
+                value={cadence}
+                onChange={(event) => setCadence(event.target.value as SeriesCadence)}
+                className="appearance-none bg-transparent pr-5 outline-none"
+              >
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+              <ChevronIcon size={13} className="pointer-events-none absolute right-1.5 text-[var(--text-subtle)]" />
+            </label>
           </div>
         ) : null}
       </div>
@@ -146,7 +186,7 @@ export function CoreMetricsDrawer({
             <>
               {/* stacked hero charts */}
               <div className="flex-1 space-y-1">
-                {chartMetrics.map((m) => {
+                {chartMetrics.map(({ metric: m, series, flagWindow }) => {
                   const d = getMetricDelta(m);
                   return (
                     <div key={m.id} className="flex items-stretch gap-3">
@@ -168,11 +208,11 @@ export function CoreMetricsDrawer({
                       </div>
                       <div className="min-w-0 flex-1">
                         <LineTimeSeries
-                          series={m.series.slice(-WINDOW_DAYS)}
+                          series={series}
                           color={m.color}
                           format={m.format}
                           height={78}
-                          flags={flagsForMetric(m.color)}
+                          flags={flagsForMetric(m.color, flagWindow)}
                         />
                       </div>
                     </div>
@@ -182,16 +222,10 @@ export function CoreMetricsDrawer({
 
               {/* summary panel — hidden below lg (would overlap the hero charts) */}
               <div className="hidden w-[320px] shrink-0 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-4 lg:block">
-                <div className="mb-3 flex items-center justify-between">
+                <div className="mb-3">
                   <h3 className="text-[13px] font-semibold text-[var(--text)]">
                     Core Metrics Summary
                   </h3>
-                  <Link
-                    href="/data-workshop"
-                    className="flex items-center gap-1 text-[12px] font-medium text-[var(--brand-blue)] hover:underline"
-                  >
-                    <PlusIcon size={13} /> Add / Layer Metric
-                  </Link>
                 </div>
 
                 <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 text-[10px] font-medium uppercase tracking-wide text-[var(--text-subtle)]">

@@ -120,24 +120,91 @@ Acceptance: a signed-in member can upload one valid daily CSV only into the acti
 
 Non-goals: warehouse connectors, spreadsheet formats, file storage, background jobs, causal recomputation, arbitrary metric selection, and replacement of observations on dates absent from the uploaded file.
 
-### Next: Slice 8 — private supplied-image path
+### Completed follow-up — workspace core-metric catalog import
 
-- Add private Storage handling for one size-capped PNG/JPEG: magic-byte validation, decode/re-encode, scoped read, deletion, and failure states. Use `memory/2026-07-22-decision-report-slice-8-handoff.md` as the new-chat implementation brief.
-- Keep lever creation as a subsequent explicit action-selection step.
-- Feature-flag the new onboarding per user/workspace; preserve legacy onboarding as rollback.
+Goal: make a newly supplied metric a durable workspace option before a Decision Report is activated, without weakening the active-report project boundary.
 
-### Persistence and materialization
+- [x] Add a separate named-metric CSV flow with explicit metric name and supported unit (`percent`, `count`, or `USD`).
+- [x] Create or reuse a scope-bound daily CSV metric and atomically upsert observations through a checked workspace-row-locked RPC.
+- [x] Render all workspace metrics in a labeled catalog and feed the same catalog into the report activation selector.
+- [x] Consolidate Data Workshop to one named uploader; catalog selection pre-fills activation and the activated metric drives the bottom Core Metrics drawer.
+- [x] Keep active reports isolated to their confirmed metric; workspace catalog availability is shown separately and does not widen the report project view.
+- [x] Cover repository validation, creation/retry idempotency, missing-workspace denial, catalog observation state, TypeScript, focused lint, full library tests, schema lint, and webpack build.
 
-- Preserve state through refresh and Back; consider autosave only after explicit-save behavior is reliable.
-- Expand Reports from the current report-native index/preview only if partner use requires revision history or export.
+Acceptance: a member can name and import an adoption-rate or visits CSV, see the created metric in the workspace catalog, and select it when activating a new report; re-imports update matching dates without duplicates and active reports remain unchanged.
 
-### Partner verification
+Non-goals: changing an already-active report's metric, multi-metric active-report isolation, warehouse connectors, causal recomputation, or background ingestion jobs.
 
-- Unit-test schema, provenance invariants, gap ordering, and typed edits.
-- Integration-test asset access when the supplied-image path lands; report RLS, snapshots, and idempotent materialization are covered.
-- Browser-test partial generation, direct edits, inline questions, metric confirmation, approval, retry, refresh, Back, and feature-flag rollback.
-- Add at least nine adversarial unsupported-claim scenarios.
-- Run at least three initially unassisted partner sessions; require at least two to pass four of five checks: decision accurate, problem accurate, evidence traceable, metric mechanism plausible, next action usable.
+### Completed Slice 8 — private supplied-image path
+
+- [x] Accept one PNG/JPEG only on a durable editable report; enforce 5 MiB input, 4096×4096, and 16 MP caps before persistence.
+- [x] Verify real signatures and exact file boundaries, fully decode with Sharp, reject malformed/truncated/trailing-data, animated, ambiguous, unsupported-color, and oversized inputs, then deterministically re-encode without metadata.
+- [x] Store only the sanitized derivative in the private `decision-report-assets` bucket under a server-owned unguessable path; never expose a service key, bucket, object path, filename, or original bytes.
+- [x] Bind asset metadata to workspace, report, and current revision; require member access for upload/read/remove; reject viewer, stale, cross-workspace, active-report, and arbitrary-asset promotion attempts.
+- [x] Attach/replace/remove through append-only report revisions. Replacement attaches the new object before retiring the old one; failed cleanup retains detached metadata for a safe later retry rather than orphaning invisible bytes.
+- [x] Render saved-report upload, processing, actionable failure, private preview, replace, remove, reload, and active-lock states while preserving the explicit no-image state.
+- [x] Verify pure sanitization, local Storage integration, exact reload, replacement/removal, forged IDs, RLS isolation, schema lint, browser success/failure paths, and server-side active-lock behavior.
+
+Acceptance: a signed-in member can attach one sanitized private image to the exact current report revision, reload its authenticated preview, replace or remove it safely, and see actionable format/size/dimension failures; activation preserves the preview and locks mutation.
+
+Non-goals: originals, multiple files, public buckets, OCR, extraction, PDFs, URL fetching, generated mock-ups, shared assets, background media processing, and general file management.
+
+### Completed partner-feedback follow-up — metric selection and report action workspace
+
+- [x] Remove the active-report banner and every redundant **Add / Layer Metric** control from Data Workshop and the persistent drawer.
+- [x] Render one **Workspace Metrics** table with an Origin column and a single green Add control; selection stays on the current page and never restarts onboarding.
+- [x] Persist up to five scope-bound core metrics through a checked, workspace-locked RPC; expose the same multi-select in onboarding while retaining one explicit prediction metric for report activation.
+- [x] Render selected metrics across dashboard tabs and the bottom drawer without widening the active report's decision, action, prediction, or impact boundary.
+- [x] Add a working trash control for removable core metrics; the active report's required metric remains labeled and locked unless it is also independently selected.
+- [x] Replace the report-native Actions & Decisions split view with a full-width Decision Summary and expandable action rows containing work-item reference, completion state, details, owner, and governance.
+- [x] Explain the actual GitHub/Jira connection contract in-product: account OAuth is not available; configured workspace credentials can create tickets, while prefilled links plus pasted issue URLs work without write access and webhooks monitor attributed work.
+- [x] Add checked manual completion for report-created manual actions, including completion date and explanation, with idempotency, same-workspace validation, member authorization, and viewer/cross-tenant denial.
+
+Acceptance: metric add/remove is an in-place operation; multiple dashboard metrics can be selected without changing the active report; Actions & Decisions opens on the report summary rather than an empty navigation column; and a member can complete a planned report action without a GitHub push while the audit detail survives reload.
+
+Non-goals: account-level GitHub/Atlassian OAuth, warehouse connectors, changing an active report's confirmed prediction metric, connector reconciliation credentials, or causal recomputation.
+
+### Completed partner-feedback follow-up — report history and metric-chart controls
+
+- [x] Add a confirmed Delete report control to the Decision Reports index for draft, ready, and activated reports.
+- [x] Soft-delete reports through a member-only, workspace-checked, retry-safe RPC; hide report revisions/assets from authenticated reads while retaining canonical decision/action audit rows and private bytes for recoverable cleanup.
+- [x] Prevent removed report-native graph rows from resurfacing through the legacy fallback; deleting the newest active report selects the next live report, and deleting the last one leaves only genuine legacy work visible.
+- [x] Number visible decisions/actions deterministically as `D1A1`, `D1A2`, and so on, using durable report action order rather than database join order.
+- [x] Render the identifier in each action header and Core Metrics flag; link each flag to the matching expanded action on Actions & Decisions.
+- [x] Replace the inert drawer labels with 30/60/90/all-data range selection and Daily/Weekly cadence controls, including calendar-day filtering, weekly averages, dynamic date labels, and in-window action flags.
+
+Acceptance: a member can remove any old Decision Report from visible workspace history without erasing audit rows; action flags are unique and navigable; changing either chart control visibly changes the plotted series while the report-native boundary and legacy fallback remain isolated.
+
+Non-goals: hard deletion or restoration UI, physical asset garbage collection, arbitrary custom date entry, monthly aggregation, changing the active report metric, or deleting canonical decision/action audit history.
+
+### Completed partner-feedback follow-up — preliminary impact visibility
+
+- [x] Load both authoritative ITS and `BEFORE_AFTER_14D` evidence for report-native action/metric edges.
+- [x] Keep the 45-day-per-side causal confidence floor intact while rendering the shorter-history mean shift as a plainly labeled preliminary descriptive readout.
+- [x] Normalize ratio-form percent metrics to percentage points, preserve unknown causal belief, and disclose overlapping actions instead of implying isolated attribution.
+- [x] Regression-test short-history rendering and live-check the Impact table with the imported Gummy Alpha series.
+
+Acceptance: completing a report action with at least 14 days of observations on each side can show a non-blank descriptive cross-check without upgrading it into a causal estimate; the confident aggregate remains gated by ITS evidence and its 45-day-per-side floor.
+
+Non-goals: automatic engine execution after import/completion, lowering the ITS confidence floor, or attributing an overlapping before/after shift to one action.
+
+### Next — Slice 9 partner rollout and clean-account acceptance
+
+Goal: expose the completed Decision Report journey to controlled partner accounts and prove that a new user can finish it without manual recovery.
+
+- [ ] Add a per-user or per-workspace rollout flag for new Decision Report starts, with the legacy onboarding flow as the explicit rollback path. Do not migrate an in-progress legacy session in place.
+- [ ] Define rollback criteria and verify that disabling new starts does not hide or corrupt already-created Decision Reports.
+- [ ] Run the clean-account browser matrix across generation/fallback, direct edits and focused questions, save/reload, browser Back, supplied-image success/failure, named metric import and multi-select, activation/retry, manual completion, preliminary impact, and flag rollback.
+- [ ] Finish the sparse safe-fallback and keyboard-focus checks left from Slice 3.
+- [ ] Add the remaining Decision Report-specific unsupported-claim cases until at least nine adversarial scenarios pass without an unsupported fact being labeled sourced.
+- [ ] Retain the existing report/asset RLS, Storage, revision, activation, metric, manual-completion, and soft-delete integration coverage in CI.
+- [ ] Run at least three initially unassisted partner sessions; require at least two to pass four of five checks: decision accurate, problem accurate, evidence traceable, metric mechanism plausible, next action usable.
+
+Acceptance: rollout can be enabled and reversed for a controlled scope; a clean account completes the existing report journey without repeated onboarding or manual database repair; already-created reports survive rollback; and the partner gate has recorded evidence rather than inferred readiness.
+
+Slice 9 non-goals: lever-flow redesign, account-level GitHub/Atlassian OAuth, warehouse connectors, automatic causal recomputation, a lower causal confidence floor, hard report deletion/restoration, autosave, revision-history/export UI, URL/PDF ingestion, OCR, or conversational delivery.
+
+Already complete and not Slice 9 work: schema/provenance/gap/edit unit coverage, explicit durable save/reload, retry-safe activation, report-native isolation, private image handling, named CSV metrics, multi-metric selection, manual action completion, report soft deletion, action coordinates/deep links, chart controls, and preliminary descriptive impact rendering.
 
 Estimated for the current builder profile: 3–5 calendar weeks at 15–25 focused hours per week. First interactive report target: roughly one week. End-to-end partner target: roughly 2–3 weeks.
 
@@ -172,7 +239,7 @@ Only begin these after the Decision Report partner gate passes:
 - Replace remaining demo service-role dashboard reads with per-request `@supabase/ssr` RLS clients where live freshness is required.
 - Add dynamic rendering or explicit revalidation to dashboard routes that must reflect per-request data.
 - Add revision-history and export surfaces only if report-index partner use calls for them.
-- Finish inert destinations only when their flows exist: New Project, Settings, manual action, and credentialed connector controls.
+- Finish inert destinations only when their flows exist: New Project, Settings, and account-level credentialed connector controls.
 - Make `LineTimeSeries` x-axis tick density viewport-aware.
 - Resolve the duplicate “Core Metrics Summary” heading on Data Workshop when the drawer is open.
 - Increase mobile header touch targets if mobile becomes a supported primary surface.

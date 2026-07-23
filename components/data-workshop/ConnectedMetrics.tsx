@@ -1,7 +1,8 @@
 import type { Metric } from "@/lib/types";
 import { formatLongDate } from "@/lib/format";
 import { summarizeMetricConnections } from "@/lib/data/metric-connections";
-import { GripIcon, PencilIcon, TrashIcon } from "@/components/ui/icons";
+import { GripIcon } from "@/components/ui/icons";
+import { CoreMetricToggle } from "@/components/data-workshop/CoreMetricToggle";
 
 function updatedLabel(iso: string): string {
   const d = new Date(iso);
@@ -16,16 +17,20 @@ function updatedLabel(iso: string): string {
 export function ConnectedMetrics({
   metrics,
   connectionSummary,
+  removableMetricIdByName = {},
+  lockedMetricName = null,
 }: {
   metrics: Metric[];
   connectionSummary?: { connected: number; total: number };
+  removableMetricIdByName?: Record<string, string>;
+  lockedMetricName?: string | null;
 }) {
   const summary = connectionSummary ?? summarizeMetricConnections(metrics.length);
 
   return (
     <div>
       <h3 className="mb-3 text-[13px] font-semibold text-[var(--text)]">
-        Connected Core Metrics ({summary.connected}/{summary.total})
+        Core Metrics ({summary.connected}/{summary.total})
       </h3>
       <table className="w-full border-collapse text-[13px]">
         <thead>
@@ -64,18 +69,16 @@ export function ConnectedMetrics({
               </td>
               <td className="px-2 py-2.5">
                 <div className="flex items-center justify-end gap-1">
-                  <button
-                    aria-label={`Edit ${m.name}`}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:bg-black/[0.03]"
-                  >
-                    <PencilIcon />
-                  </button>
-                  <button
-                    aria-label={`Remove ${m.name}`}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:bg-black/[0.03]"
-                  >
-                    <TrashIcon />
-                  </button>
+                  {removableMetricIdByName[m.name] ? (
+                    <CoreMetricToggle
+                      metricId={removableMetricIdByName[m.name]}
+                      metricName={m.name}
+                      selected
+                      appearance="remove"
+                    />
+                  ) : lockedMetricName === m.name ? (
+                    <span className="text-[10px] font-medium text-[var(--text-subtle)]">Report metric</span>
+                  ) : null}
                 </div>
               </td>
             </tr>

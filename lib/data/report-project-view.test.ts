@@ -62,3 +62,21 @@ test("legacy workspaces retain their complete dashboard payload", () => {
   assert.equal(view.decisions, decisions);
   assert.equal(view.metrics, metrics);
 });
+
+test("orphaned report-native graph rows do not leak through legacy fallback", () => {
+  const legacyAction = action("legacy-action");
+  const removedReportAction = action("removed-report-action");
+  const legacyDecision = decision("legacy", [legacyAction.id]);
+  const removedReportDecision = decision("report-decision", [removedReportAction.id]);
+  const view = selectReportProjectView({
+    reports: [],
+    actions: [removedReportAction, legacyAction],
+    decisions: [removedReportDecision, legacyDecision],
+    metrics: [metric("arr")],
+    metricUiIdByDbId: new Map(),
+    aggregatedImpact: [],
+    impactByMetric: [],
+  });
+  assert.deepEqual(view.decisions.map((item) => item.id), ["legacy"]);
+  assert.deepEqual(view.actions.map((item) => item.id), ["legacy-action"]);
+});
